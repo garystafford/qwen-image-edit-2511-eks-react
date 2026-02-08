@@ -14,8 +14,6 @@ graph TD
     ALB -- "/api, /health" --> Model["Model Service<br/>FastAPI · Port 8000<br/>NVIDIA L40S GPU<br/>~6GB image · 32Gi mem"]
     ALB -- "/ (all other)" --> UI["UI Service<br/>React · Port 80<br/>No GPU needed<br/>~25MB image · 128Mi mem"]
 
-    UI -. "cluster DNS<br/>qwen-model-service.qwen.svc:8000" .-> Model
-
     Model -- "Loads from /mnt/qwen-models" --> DS["DaemonSet · Model Cache<br/>Downloads model from S3<br/>to node-local EBS on first boot"]
 
     DS --> S3[("S3 Bucket<br/>17GB model<br/>4-bit quantized")]
@@ -285,7 +283,9 @@ python scripts/batch_process_fastapi.py \
 ├── .env.example                  # Environment config template (cp to .env)
 ├── Dockerfile.model              # Model container (CUDA + FastAPI)
 ├── Dockerfile.ui-react           # UI container (React + nginx)
+├── LICENSE                       # MIT License
 ├── Makefile                      # Build/deploy/status commands
+├── screenshot.png                # UI preview image
 ├── requirements-base.txt         # PyTorch, transformers, diffusers
 ├── requirements-app.txt          # FastAPI, Pydantic
 ├── src/
@@ -298,7 +298,7 @@ python scripts/batch_process_fastapi.py \
 │   │   ├── namespace.yaml        # qwen namespace
 │   │   ├── serviceaccount.yaml   # IAM role for S3 access
 │   │   ├── deployment-model.yaml # Model pod (GPU, 32Gi)
-│   │   ├── deployment-ui.yaml    # UI pod (no GPU, 512Mi)
+│   │   ├── deployment-ui.yaml    # UI pod (no GPU, 128Mi)
 │   │   ├── service-model.yaml    # ClusterIP :8000
 │   │   ├── service-ui.yaml       # ClusterIP :80
 │   │   ├── ingress.yaml          # ALB with path-based routing

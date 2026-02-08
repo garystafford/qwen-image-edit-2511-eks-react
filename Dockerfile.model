@@ -81,7 +81,7 @@ ENV HF_HOME=/models/.cache/huggingface \
 
 # Health check for FastAPI
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=5)" || exit 1
 
 # Run FastAPI server only
 CMD ["python", "server.py"]
