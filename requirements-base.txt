@@ -1,0 +1,14 @@
+# Heavy ML dependencies (base layer - rarely changes)
+# This layer takes ~10 minutes to build but is cached for subsequent builds
+
+git+https://github.com/huggingface/diffusers.git@973a077c6a4e7e7a7ea61a84bedd29ac24fb609a
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+transformers
+accelerate
+safetensors
+sentencepiece
+kernels
+bitsandbytes
+diffusers[torch]

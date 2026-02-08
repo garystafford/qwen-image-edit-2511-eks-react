@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen-model
+  namespace: qwen
+  labels:
+    app: qwen-model
+    component: inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qwen-model
+  template:
+    metadata:
+      labels:
+        app: qwen-model
+        component: inference
+    spec:
+      serviceAccountName: qwen-s3-access
+      containers:
+        - name: model
+          image: PLACEHOLDER_MODEL_IMAGE
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: fastapi
+          env:
+            - name: HOME
+              value: /tmp
+            - name: HF_HOME
+              value: /models
+            - name: TRANSFORMERS_CACHE
+              value: /models
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+              readOnly: false
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 120
+            failureThreshold: 4
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 120
+            failureThreshold: 5
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "2000m"
+              memory: "32Gi"
+            requests:
+              cpu: "600m"
+              memory: "24Gi"
+              nvidia.com/gpu: "1"
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: /mnt/qwen-models
+            type: Directory
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule

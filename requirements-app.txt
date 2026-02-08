@@ -1,0 +1,7 @@
+# Lightweight web dependencies (app layer - changes frequently)
+# This layer takes ~1 minute to build
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.25.0
+pydantic>=2.0
+pillow>=10.1.0

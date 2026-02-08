@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen-ui
+  namespace: qwen
+  labels:
+    app: qwen-ui
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qwen-ui
+  template:
+    metadata:
+      labels:
+        app: qwen-ui
+        component: frontend
+    spec:
+      containers:
+        - name: ui
+          image: PLACEHOLDER_UI_IMAGE
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+            requests:
+              cpu: "50m"
+              memory: "64Mi"

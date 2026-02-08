@@ -1,0 +1,50 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: qwen-ingress
+  namespace: qwen
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/inbound-cidrs: PLACEHOLDER_ALLOWED_IP_CIDR
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/success-codes: '200'
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+    alb.ingress.kubernetes.io/load-balancer-name: qwen-alb
+    # HTTPS configuration
+    alb.ingress.kubernetes.io/certificate-arn: PLACEHOLDER_CERTIFICATE_ARN
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+  labels:
+    app: qwen
+spec:
+  ingressClassName: alb
+  rules:
+    - host: PLACEHOLDER_DOMAIN
+      http:
+        paths:
+          # API endpoints go to model service
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: qwen-model-service
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: qwen-model-service
+                port:
+                  number: 8000
+          # Root and all other paths go to UI
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: qwen-ui-service
+                port:
+                  number: 80

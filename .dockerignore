@@ -1,0 +1,65 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python virtual environments
+.venv/
+.venv-local/
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Model and output directories (large files)
+model_cache/
+output_images/
+batch_output/
+interim_images/
+
+# Documentation (not needed in containers)
+*.md
+!README.md
+docs/
+
+# Kubernetes and infrastructure (not needed in containers)
+k8s/
+scripts/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Docker
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+logs/
+.cache/
+
+# OS files
+Thumbs.db

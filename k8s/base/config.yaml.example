@@ -1,0 +1,105 @@
+# =============================================================================
+# Configuration Template for Qwen Image Edit on EKS
+# =============================================================================
+# This file contains all environment-specific values for deploying to AWS.
+# To use this project:
+#   1. Copy this file to config.yaml: cp config.yaml.example config.yaml
+#   2. Update all values with YOUR- prefix to match your AWS environment
+#   3. Deploy with: kubectl apply -k k8s/base/
+#
+# Note: config.yaml is in .gitignore to prevent committing secrets
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deployment-config
+  namespace: qwen
+data:
+  # =============================================================================
+  # AWS Account Configuration
+  # =============================================================================
+  # CHANGE THESE: Your AWS account ID and preferred region
+  AWS_ACCOUNT_ID: "YOUR-ACCOUNT-ID"
+  AWS_REGION: "YOUR-REGION"  # e.g., us-east-1, us-west-2, eu-west-1
+
+  # =============================================================================
+  # Container Images
+  # =============================================================================
+  # CHANGE THESE: Full image references with version tags
+  # Build images with: ./scripts/build-and-push-ui.sh 1.0.0
+  #                    ./scripts/build-and-push-model.sh 1.0.0
+  # Format: {account-id}.dkr.ecr.{region}.amazonaws.com/{repo-name}:{version}
+  UI_IMAGE: "YOUR-ACCOUNT-ID.dkr.ecr.YOUR-REGION.amazonaws.com/qwen-ui:1.0.0"
+  MODEL_IMAGE: "YOUR-ACCOUNT-ID.dkr.ecr.YOUR-REGION.amazonaws.com/qwen-model:1.0.0"
+
+  # =============================================================================
+  # IAM and S3 Configuration
+  # =============================================================================
+  # CHANGE THESE: Create IAM role with S3 access and EKS trust policy
+  # Role needs: AmazonS3ReadOnlyAccess (or specific bucket permissions)
+  # Trust relationship: Allow eks.amazonaws.com to assume role with OIDC
+  IAM_ROLE_ARN: "arn:aws:iam::YOUR-ACCOUNT-ID:role/qwen-s3-access-role"
+
+  # CHANGE THIS: S3 bucket containing the cached Qwen model
+  # Create bucket and upload model using: aws s3 sync local-model-dir s3://bucket/prefix/
+  S3_BUCKET: "YOUR-BUCKET-NAME"
+
+  # =============================================================================
+  # Network and Security Configuration
+  # =============================================================================
+  # CHANGE THESE: Network access and domain settings
+
+  # Your public IP for ALB access restriction (CIDR format)
+  # Find your IP: curl ifconfig.me
+  ALLOWED_IP_CIDR: "YOUR-IP-ADDRESS/32"  # e.g., "1.2.3.4/32" for single IP
+
+  # Your custom domain (must match ACM certificate)
+  DOMAIN: "YOUR-DOMAIN.example.com"  # e.g., "qwen.example.com"
+
+  # ACM certificate ARN for HTTPS (create in AWS Certificate Manager)
+  # Wildcard cert recommended: *.example.com
+  CERTIFICATE_ARN: "arn:aws:acm:YOUR-REGION:YOUR-ACCOUNT-ID:certificate/YOUR-CERT-ID"
+
+  # =============================================================================
+  # EKS Cluster Configuration
+  # =============================================================================
+  # CHANGE THIS: Your EKS cluster name
+  CLUSTER_NAME: "YOUR-CLUSTER-NAME"
+
+  # =============================================================================
+  # Model Configuration
+  # =============================================================================
+  # USUALLY DON'T CHANGE: These are model-specific settings
+
+  # Node-local cache path (GPU nodes with EBS volumes)
+  MODEL_CACHE_PATH: "/mnt/qwen-models"
+
+  # HuggingFace model ID
+  MODEL_ID: "ovedrive/Qwen-Image-Edit-2511-4bit"
+
+# =============================================================================
+# Deployment Instructions
+# =============================================================================
+#
+# Prerequisites:
+# 1. EKS cluster with GPU nodes (g6e.xlarge or similar with NVIDIA GPUs)
+# 2. AWS Load Balancer Controller installed
+# 3. ECR repositories created: qwen-ui and qwen-model
+# 4. S3 bucket with model files
+# 5. IAM role with S3 access and EKS OIDC trust
+# 6. ACM certificate for your domain
+# 7. Route 53 or DNS configured for your domain
+#
+# Deployment Steps:
+# 1. cp config.yaml.example config.yaml
+# 2. Edit config.yaml with your AWS account values
+# 3. Build and push images:
+#    ./scripts/build-and-push-ui.sh 1.0.0
+#    ./scripts/build-and-push-model.sh 1.0.0
+# 4. Deploy: kubectl apply -k k8s/base/
+# 5. Check status: kubectl get pods -n qwen
+# 6. Access: https://YOUR-DOMAIN
+#
+# For detailed setup instructions, see docs/deployment.md
+# =============================================================================

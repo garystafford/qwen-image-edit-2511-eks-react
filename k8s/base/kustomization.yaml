@@ -1,0 +1,142 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: qwen
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - daemonset-model-cache.yaml
+  - deployment-model.yaml
+  - service-model.yaml
+  - deployment-ui.yaml
+  - service-ui.yaml
+  - ingress.yaml
+  - config.yaml
+
+commonLabels:
+  project: qwen-image-edit
+  managed-by: kustomize
+
+# All environment-specific values are managed through config.yaml
+# Update config.yaml to deploy to a different AWS account/region
+replacements:
+  # Replace IAM Role ARN in ServiceAccount
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.IAM_ROLE_ARN
+    targets:
+      - select:
+          kind: ServiceAccount
+          name: qwen-s3-access
+        fieldPaths:
+          - metadata.annotations.[eks.amazonaws.com/role-arn]
+
+  # Replace Model Image in Deployment
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.MODEL_IMAGE
+    targets:
+      - select:
+          kind: Deployment
+          name: qwen-model
+        fieldPaths:
+          - spec.template.spec.containers.[name=model].image
+
+  # Replace UI Image in Deployment
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.UI_IMAGE
+    targets:
+      - select:
+          kind: Deployment
+          name: qwen-ui
+        fieldPaths:
+          - spec.template.spec.containers.[name=ui].image
+
+  # Replace Model Image in DaemonSet
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.MODEL_IMAGE
+    targets:
+      - select:
+          kind: DaemonSet
+          name: qwen-model-cache
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=download-model].image
+
+  # Replace S3 Bucket in DaemonSet env var
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.S3_BUCKET
+    targets:
+      - select:
+          kind: DaemonSet
+          name: qwen-model-cache
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=download-model].env.[name=S3_BUCKET].value
+
+  # Replace AWS Region in DaemonSet
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.AWS_REGION
+    targets:
+      - select:
+          kind: DaemonSet
+          name: qwen-model-cache
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=download-model].env.[name=AWS_REGION].value
+
+  # Replace IAM Role ARN in DaemonSet
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.IAM_ROLE_ARN
+    targets:
+      - select:
+          kind: DaemonSet
+          name: qwen-model-cache
+        fieldPaths:
+          - spec.template.spec.initContainers.[name=download-model].env.[name=AWS_ROLE_ARN].value
+
+  # Replace Domain in Ingress
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.DOMAIN
+    targets:
+      - select:
+          kind: Ingress
+          name: qwen-ingress
+        fieldPaths:
+          - spec.rules.0.host
+
+  # Replace Certificate ARN in Ingress
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.CERTIFICATE_ARN
+    targets:
+      - select:
+          kind: Ingress
+          name: qwen-ingress
+        fieldPaths:
+          - metadata.annotations.[alb.ingress.kubernetes.io/certificate-arn]
+
+  # Replace allowed IP CIDR in Ingress
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.ALLOWED_IP_CIDR
+    targets:
+      - select:
+          kind: Ingress
+          name: qwen-ingress
+        fieldPaths:
+          - metadata.annotations.[alb.ingress.kubernetes.io/inbound-cidrs]

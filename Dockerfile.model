@@ -1,0 +1,87 @@
+# Model inference container (FastAPI + Qwen-Image-Edit model)
+# Heavy container with CUDA, PyTorch, transformers
+# Runs on GPU nodes
+
+# =============================================================================
+# STAGE 1: Base layer (heavy ML dependencies - rarely changes)
+# =============================================================================
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS base
+
+LABEL maintainer="gary.a.stafford@gmail.com" \
+      stage="base"
+
+WORKDIR /app
+
+# Set non-interactive mode
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    PYTHONUNBUFFERED=1
+
+# Install Python, AWS CLI, build tools, and dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
+    python3-pip \
+    git \
+    ca-certificates \
+    curl \
+    unzip \
+    build-essential \
+    gcc \
+    g++ \
+    && curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm -rf aws awscliv2.zip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.10 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+
+# Install heavy ML dependencies (this layer is cached)
+COPY requirements-base.txt .
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir -r requirements-base.txt --extra-index-url https://download.pytorch.org/whl/cu124
+
+# =============================================================================
+# STAGE 2: App layer (FastAPI server + model code)
+# =============================================================================
+FROM base AS app
+
+LABEL maintainer="gary.a.stafford@gmail.com" \
+      app="qwen-image-edit-model" \
+      version="1.0" \
+      description="Qwen Image Edit model inference service (FastAPI only)"
+
+# Install FastAPI dependencies
+COPY requirements-app.txt .
+RUN python -m pip install --no-cache-dir -r requirements-app.txt
+
+# Copy server code
+COPY src/server.py .
+
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
+    chown -R appuser:appuser /app && \
+    mkdir -p /models && chown -R appuser:appuser /models
+
+# Switch to non-root user
+USER appuser
+
+# Expose FastAPI port only
+EXPOSE 8000
+
+# Set environment defaults
+ENV HF_HOME=/models/.cache/huggingface \
+    TRANSFORMERS_CACHE=/models/.cache/huggingface/hub
+
+# Health check for FastAPI
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)" || exit 1
+
+# Run FastAPI server only
+CMD ["python", "server.py"]

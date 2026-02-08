@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: qwen-model-cache
+  namespace: qwen
+spec:
+  selector:
+    matchLabels:
+      app: qwen-model-cache
+  template:
+    metadata:
+      labels:
+        app: qwen-model-cache
+    spec:
+      serviceAccountName: qwen-s3-access
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      initContainers:
+        - name: download-model
+          image: PLACEHOLDER_MODEL_IMAGE
+          securityContext:
+            runAsUser: 0  # Run as root to write to host path
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+
+              MODEL_DIR="/host-models/models--ovedrive--Qwen-Image-Edit-2511-4bit"
+              MARKER_FILE="/host-models/.model-ready"
+              # S3_BUCKET comes from environment variable
+              S3_PREFIX="qwen-image-edit-2511-4bit"
+
+              echo "=== Qwen Model Cache DaemonSet ==="
+              echo "Node: $(hostname)"
+              echo "Model directory: ${MODEL_DIR}"
+
+              # Check if model already exists on this node
+              if [ -f "${MARKER_FILE}" ]; then
+                echo "✓ Model already cached on this node"
+                exit 0
+              fi
+
+              echo "Model not found, downloading from S3..."
+              echo "S3 location: s3://${S3_BUCKET}/${S3_PREFIX}/"
+
+              # Create directory
+              mkdir -p "${MODEL_DIR}"
+
+              # Download from S3 to node-local storage
+              echo "Starting download..."
+              time aws s3 sync \
+                "s3://${S3_BUCKET}/${S3_PREFIX}/" \
+                "${MODEL_DIR}/" \
+                --region ${AWS_REGION} \
+                --no-progress
+
+              # Set permissions for appuser (UID 1000)
+              echo "Setting permissions for appuser..."
+              chown -R 1000:1000 /host-models
+              chmod -R 755 /host-models
+
+              # Create marker file
+              echo "$(date)" > "${MARKER_FILE}"
+
+              echo "✓ Model cached successfully to node-local EBS"
+              echo "✓ Future pods on this node will use cached model"
+          volumeMounts:
+            - name: host-models
+              mountPath: /host-models
+            - name: aws-iam-token
+              mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+              readOnly: true
+          env:
+            - name: S3_BUCKET
+              value: PLACEHOLDER_S3_BUCKET
+            - name: AWS_REGION
+              value: PLACEHOLDER_AWS_REGION
+            - name: AWS_ROLE_ARN
+              value: PLACEHOLDER_IAM_ROLE_ARN
+            - name: AWS_WEB_IDENTITY_TOKEN_FILE
+              value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+      containers:
+        # Keep-alive container (DaemonSet needs a long-running container)
+        - name: keeper
+          image: busybox:latest
+          command: ["sh", "-c", "echo 'Model cache ready'; sleep infinity"]
+          resources:
+            requests:
+              memory: "10Mi"
+              cpu: "10m"
+            limits:
+              memory: "20Mi"
+              cpu: "20m"
+      volumes:
+        - name: host-models
+          hostPath:
+            path: /mnt/qwen-models
+            type: DirectoryOrCreate
+        - name: aws-iam-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: sts.amazonaws.com
+                  expirationSeconds: 86400
+                  path: token
