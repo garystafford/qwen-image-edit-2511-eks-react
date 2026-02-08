@@ -29,6 +29,17 @@ graph TD
 Separating UI from model allows fast UI iteration
 without rebuilding the heavy model container.
 
+### TLS and Traffic Flow
+
+TLS terminates at the ALB. Internal cluster traffic uses plain HTTP.
+
+```mermaid
+graph LR
+    User(["User<br/>(Browser)"]) -->|"HTTPS/443"| ALB["ALB Ingress<br/>TLS termination"]
+    ALB -->|"HTTP/80<br/>/ (static files)"| UI["qwen-ui-service<br/>ClusterIP :80<br/>nginx pod"]
+    ALB -->|"HTTP/8000<br/>/api, /health"| Model["qwen-model-service<br/>ClusterIP :8000<br/>FastAPI pod"]
+```
+
 ## Deployment Flow
 
 ```mermaid
