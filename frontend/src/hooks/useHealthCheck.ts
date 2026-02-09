@@ -8,14 +8,12 @@ export function useHealthCheck(intervalMs = 10_000) {
 
   useEffect(() => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setInterval>;
-
     const poll = async () => {
       try {
         const data = await checkHealth(controller.signal);
         setHealth(data);
         setError(null);
-      } catch (e) {
+      } catch {
         if (!controller.signal.aborted) {
           setHealth(null);
           setError('Not connected');
@@ -24,7 +22,7 @@ export function useHealthCheck(intervalMs = 10_000) {
     };
 
     poll();
-    timer = setInterval(poll, intervalMs);
+    const timer = setInterval(poll, intervalMs);
 
     return () => {
       controller.abort();

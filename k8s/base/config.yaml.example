@@ -50,16 +50,27 @@ data:
   # =============================================================================
   # CHANGE THESE: Network access and domain settings
 
-  # Your public IP for ALB access restriction (CIDR format)
-  # Find your IP: curl ifconfig.me
-  ALLOWED_IP_CIDR: "YOUR-IP-ADDRESS/32"  # e.g., "1.2.3.4/32" for single IP
-
   # Your custom domain (must match ACM certificate)
   DOMAIN: "YOUR-DOMAIN.example.com"  # e.g., "qwen.example.com"
 
   # ACM certificate ARN for HTTPS (create in AWS Certificate Manager)
-  # Wildcard cert recommended: *.example.com
+  # Must be in us-east-1 for CloudFront. Wildcard cert recommended: *.example.com
   CERTIFICATE_ARN: "arn:aws:acm:YOUR-REGION:YOUR-ACCOUNT-ID:certificate/YOUR-CERT-ID"
+
+  # =============================================================================
+  # Cognito Authentication (ALB integration)
+  # =============================================================================
+  # CHANGE THIS: JSON string with Cognito User Pool details for ALB auth
+  # Prerequisites:
+  #   1. Cognito User Pool with a configured domain
+  #   2. App Client created with: --generate-secret --allowed-o-auth-flows code
+  #      --allowed-o-auth-scopes openid --callback-urls "https://<DOMAIN>/oauth2/idpresponse"
+  # Run: scripts/setup-cloudfront-auth.sh to create these resources
+  COGNITO_IDP_CONFIG: '{"userPoolARN":"arn:aws:cognito-idp:YOUR-REGION:YOUR-ACCOUNT-ID:userpool/YOUR-POOL-ID","userPoolClientID":"YOUR-CLIENT-ID","userPoolDomain":"YOUR-PREFIX.auth.YOUR-REGION.amazoncognito.com"}'
+
+  # WAF WebACL ARN for origin verification (blocks non-CloudFront traffic)
+  # Created by: scripts/setup-cloudfront-auth.sh step 6
+  WAF_ACL_ARN: "arn:aws:wafv2:YOUR-REGION:YOUR-ACCOUNT-ID:regional/webacl/YOUR-WEBACL-NAME/YOUR-WEBACL-ID"
 
   # =============================================================================
   # EKS Cluster Configuration

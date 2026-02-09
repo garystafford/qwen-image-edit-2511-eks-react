@@ -5,7 +5,7 @@ ifneq (,$(wildcard ./.env))
     ECR_REGISTRY = $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 endif
 
-.PHONY: help verify build-and-push-ui build-and-push-model build-and-push-all deploy port-forward status logs logs-ui logs-model clean batch lint lint-python lint-bash lint-markdown format
+.PHONY: help verify build-and-push-ui build-and-push-model build-and-push-all deploy port-forward status logs logs-ui logs-model clean batch lint lint-python lint-bash lint-markdown lint-frontend format
 
 # Default target
 help:
@@ -31,13 +31,14 @@ help:
 	@echo "  make port-forward    Start port-forward to model service"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make batch           Run batch test against FastAPI endpoint"
+	@echo "  make batch           Run batch test via port-forward (localhost:8000)"
 	@echo ""
 	@echo "Linting:"
-	@echo "  make lint            Run all linters (python, bash, markdown)"
+	@echo "  make lint            Run all linters (python, bash, markdown, frontend)"
 	@echo "  make lint-python     Run black (check) + ruff on Python files"
 	@echo "  make lint-bash       Run shellcheck on shell scripts"
 	@echo "  make lint-markdown   Run markdownlint on Markdown files"
+	@echo "  make lint-frontend   Run eslint on React/TypeScript frontend"
 	@echo "  make format          Auto-format Python files (black + ruff fix)"
 	@echo ""
 	@echo "Cleanup:"
@@ -106,13 +107,14 @@ logs-model:
 	@echo "Tailing model logs..."
 	kubectl logs -n $(K8S_NAMESPACE) -l app=qwen-model --tail=100 -f
 
-# Testing
+# Testing (requires active port-forward: make port-forward)
 batch:
-	@echo "Running batch test against FastAPI endpoint..."
-	python scripts/batch_process_fastapi.py
+	@echo "Running batch test via port-forward (http://localhost:8000)..."
+	@echo "Ensure port-forward is active: make port-forward &"
+	python scripts/batch_process_fastapi.py --url http://localhost:8000
 
 # Linting
-lint: lint-python lint-bash lint-markdown
+lint: lint-python lint-bash lint-markdown lint-frontend
 
 lint-python:
 	@echo "=== Python: black (check) ==="
@@ -128,6 +130,10 @@ lint-bash:
 lint-markdown:
 	@echo "=== Markdown: markdownlint ==="
 	npx markdownlint-cli README.md
+
+lint-frontend:
+	@echo "=== Frontend: eslint ==="
+	cd frontend && npm run lint
 
 format:
 	@echo "=== Formatting Python files ==="

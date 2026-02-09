@@ -129,14 +129,26 @@ replacements:
         fieldPaths:
           - metadata.annotations.[alb.ingress.kubernetes.io/certificate-arn]
 
-  # Replace allowed IP CIDR in Ingress
+  # Replace Cognito IDP config in Ingress
   - source:
       kind: ConfigMap
       name: deployment-config
-      fieldPath: data.ALLOWED_IP_CIDR
+      fieldPath: data.COGNITO_IDP_CONFIG
     targets:
       - select:
           kind: Ingress
           name: qwen-ingress
         fieldPaths:
-          - metadata.annotations.[alb.ingress.kubernetes.io/inbound-cidrs]
+          - metadata.annotations.[alb.ingress.kubernetes.io/auth-idp-cognito]
+
+  # Replace WAF WebACL ARN in Ingress
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.WAF_ACL_ARN
+    targets:
+      - select:
+          kind: Ingress
+          name: qwen-ingress
+        fieldPaths:
+          - metadata.annotations.[alb.ingress.kubernetes.io/wafv2-acl-arn]

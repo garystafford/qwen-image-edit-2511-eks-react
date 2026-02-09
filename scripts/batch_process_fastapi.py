@@ -34,6 +34,7 @@ DEFAULT_NEGATIVE_PROMPT = (
     "artifact, noisy, pixelated, compression artifacts, 'AI generated' text and surrounding box"
 )
 
+
 def image_to_base64(image_path: Path) -> str:
     """Read an image file and return its base64-encoded string."""
     with open(image_path, "rb") as f:
@@ -117,7 +118,11 @@ def process_image(
             timeout=timeout,
         )
         if resp.status_code in (503, 504) and attempt < max_retries:
-            print(f"{resp.status_code} (retry {attempt}/{max_retries}, waiting {retry_delay:.0f}s)...", end=" ", flush=True)
+            print(
+                f"{resp.status_code} (retry {attempt}/{max_retries}, waiting {retry_delay:.0f}s)...",
+                end=" ",
+                flush=True,
+            )
             time.sleep(retry_delay)
             continue
         resp.raise_for_status()
@@ -322,9 +327,7 @@ def main():
                 seeds = ", ".join(str(img["seed"]) for img in result["images"])
                 n_variants = len(result["images"])
                 variant_info = f", {n_variants} variants" if n_variants > 1 else ""
-                print(
-                    f"OK ({format_time(elapsed)}, seed={seeds}{variant_info})"
-                )
+                print(f"OK ({format_time(elapsed)}, seed={seeds}{variant_info})")
                 success_count += 1
                 times.append(elapsed)
             else:

@@ -23,14 +23,13 @@ export default function App() {
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   useEffect(() => {
-    if (isLoading) {
-      setLoadingSeconds(0);
-      timerRef.current = setInterval(() => {
-        setLoadingSeconds((s) => s + 1);
-      }, 1000);
-    } else {
+    if (!isLoading) {
       clearInterval(timerRef.current);
+      return;
     }
+    timerRef.current = setInterval(() => {
+      setLoadingSeconds((s) => s + 1);
+    }, 1000);
     return () => clearInterval(timerRef.current);
   }, [isLoading]);
 
@@ -59,6 +58,7 @@ export default function App() {
 
   const handleSubmit = async () => {
     if (images.length === 0 || !prompt.trim()) return;
+    setLoadingSeconds(0);
 
     const imageInputs = await Promise.all(
       images.map(async (img) => ({

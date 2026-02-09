@@ -8,7 +8,12 @@ AI-powered image editing using the Qwen Vision Language Model, deployed on Amazo
 
 ```mermaid
 graph TD
-    Users(["USERS"]) --> ALB["ALB Ingress<br/>HTTPS/443"]
+    Users(["USERS"]) --> R53["Route 53<br/>DNS"]
+    R53 --> CF["CloudFront<br/>HTTPS · CDN<br/>Adds X-Origin-Verify header"]
+    CF --> WAF["WAF WebACL<br/>Validates origin header<br/>Blocks direct ALB access"]
+    WAF --> ALB["ALB Ingress<br/>HTTPS/443"]
+    ALB --> Cognito["Cognito<br/>User Pool<br/>OAuth2 login"]
+    Cognito --> ALB
 
     ALB -- "/api, /health" --> Model["Model Service<br/>FastAPI · Port 8000<br/>NVIDIA L40S GPU<br/>~6GB image · 32Gi mem"]
     ALB -- "/ (all other)" --> UI["UI Service<br/>React · Port 80<br/>No GPU needed<br/>~25MB image · 128Mi mem"]
@@ -30,11 +35,13 @@ without rebuilding the heavy model container.
 
 ### TLS and Traffic Flow
 
-TLS terminates at the ALB. Internal cluster traffic uses plain HTTP.
+TLS terminates at CloudFront (viewer-facing) and again at the ALB (origin-facing). Internal cluster traffic uses plain HTTP. WAF validates the origin verify header before the ALB processes the request. Cognito authentication is handled at the ALB layer.
 
 ```mermaid
 graph LR
-    User(["User<br/>(Browser)"]) -->|"HTTPS/443"| ALB["ALB Ingress<br/>TLS termination"]
+    User(["User<br/>(Browser)"]) -->|"HTTPS/443"| CF["CloudFront<br/>TLS termination<br/>+ origin header"]
+    CF -->|"HTTPS/443"| WAF["WAF<br/>Verify origin"]
+    WAF -->|"HTTPS/443"| ALB["ALB<br/>Cognito auth<br/>+ TLS termination"]
     ALB -->|"HTTP/80<br/>/ (static files)"| UI["qwen-ui-service<br/>ClusterIP :80<br/>nginx pod"]
     ALB -->|"HTTP/8000<br/>/api, /health"| Model["qwen-model-service<br/>ClusterIP :8000<br/>FastAPI pod"]
 ```
@@ -62,7 +69,8 @@ graph LR
     ui_img --> ECR
     kust --> EKS["EKS<br/>Namespace: qwen"]
     ECR --> EKS
-    EKS --> access["4. ACCESS<br/>ALB → React UI → FastAPI Model"]
+    EKS --> cfauth["4. Auth Setup<br/>CloudFront + WAF + Cognito"]
+    cfauth --> access["5. ACCESS<br/>CloudFront → ALB → React UI → FastAPI"]
 ```
 
 ## Request Flow
@@ -70,14 +78,27 @@ graph LR
 ```mermaid
 sequenceDiagram
     actor User
+    participant CF as CloudFront
+    participant WAF as WAF WebACL
     participant ALB as ALB Ingress
+    participant Cognito as Cognito
     participant UI as React UI<br/>Port 80
     participant API as FastAPI Model<br/>Port 8000
     participant GPU as Diffusion Pipeline<br/>NVIDIA L40S
 
-    User->>ALB: Upload image + prompt
+    User->>CF: HTTPS request
+    CF->>CF: Add X-Origin-Verify header
+    CF->>WAF: Forward to ALB origin
+    WAF->>WAF: Validate origin header
+    WAF->>ALB: Allow request
+    ALB->>Cognito: Check authentication
+    Cognito-->>User: Redirect to login (if unauthenticated)
+    User->>Cognito: Login with credentials
+    Cognito-->>ALB: Auth token (cookie)
     ALB->>UI: Serve React static files
-    UI->>ALB: POST /api/v1/batch/infer<br/>(base64 image + prompt + params)
+    UI->>CF: POST /api/v1/batch/infer<br/>(base64 image + prompt + params)
+    CF->>WAF: Forward API request
+    WAF->>ALB: Allow request
     ALB->>API: Route /api to model service
     API->>API: Decode image, build pipeline args
     API->>GPU: Run diffusion (20 steps default)
@@ -85,7 +106,7 @@ sequenceDiagram
     API->>API: Encode result as base64
     API-->>UI: JSON response (base64 image + seed)
     UI->>UI: Decode and display result
-    ALB-->>User: Edited image
+    CF-->>User: Edited image
 ```
 
 ## Model Loading Sequence
@@ -178,7 +199,23 @@ cp k8s/base/config.yaml.example k8s/base/config.yaml
 ./scripts/deploy.sh
 ```
 
-### 5. Verify
+### 5. Setup CloudFront Authentication (Optional)
+
+Set up CloudFront + WAF + Cognito for production authentication:
+
+```bash
+# Configure authentication variables in .env
+# COGNITO_USER_POOL_ID, APP_DOMAIN, ALB_NAME
+
+# Run the setup script
+./scripts/setup-cloudfront-auth.sh
+```
+
+This creates a Cognito app client, CloudFront distribution with origin verify
+header, WAF WebACL to block direct ALB access, and Route 53 DNS records.
+See `scripts/README.md` for details.
+
+### 6. Verify
 
 ```bash
 # Watch pods come up
@@ -200,13 +237,17 @@ make logs                          # Tail all logs
 make logs-model                    # Tail model logs
 make logs-ui                       # Tail UI logs
 make port-forward                  # Port-forward to model service
-make batch                         # Run batch test
+make batch                         # Run batch test via port-forward
 make clean                         # Remove local artifacts
 ```
 
 ## API
 
 The model service exposes a FastAPI REST API on port 8000.
+
+> **Note**: With CloudFront + Cognito authentication enabled, the public URL
+> requires browser-based login. For CLI/script access, use `kubectl port-forward`
+> to bypass the auth layer and connect directly to the model service.
 
 ### Health Check
 
@@ -250,7 +291,8 @@ curl -X POST http://localhost:8000/api/v1/batch/infer \
 ### Batch Testing Script
 
 The batch script processes all images in `samples_images/`
-against the FastAPI endpoint.
+against the FastAPI endpoint. Use `kubectl port-forward` to connect
+directly to the model service, bypassing CloudFront/Cognito auth.
 
 **Setup** (one-time):
 
@@ -263,27 +305,34 @@ pip install requests
 **Usage**:
 
 ```bash
+# Start port-forward in background
+kubectl port-forward -n qwen svc/qwen-model-service 8000:8000 &
+sleep 3  # wait for tunnel to establish
+
 # Run with defaults
 python scripts/batch_process_fastapi.py \
-  --url https://your-domain.example.com
+  --url http://localhost:8000
 
 # Custom prompt
 python scripts/batch_process_fastapi.py \
-  --url https://your-domain.example.com \
+  --url http://localhost:8000 \
   --prompt "Make it a watercolor painting"
 
 # With options
 python scripts/batch_process_fastapi.py \
-  --url https://your-domain.example.com \
+  --url http://localhost:8000 \
   --steps 30 --guidance-scale 5.0 --seed 123 \
   --output ./results
 
 # Example from blog post
 python scripts/batch_process_fastapi.py \
-    --url https://your-domain.example.com \
+    --url http://localhost:8000 \
     --prompt "Convert this image into clean black-and-white Japanese manga line art. Crisp inked outlines, no shading or color. Extend or generate additional background as needed to fill the 1:1 aspect-ratio canvas." \
     --steps 30 --guidance-scale 5.0 --seed 123 \
     --input ./samples_images/ --output ./output_images/
+
+# Stop port-forward when done
+kill %1
 ```
 
 ## Project Structure
@@ -311,7 +360,7 @@ python scripts/batch_process_fastapi.py \
 │   │   ├── deployment-ui.yaml    # UI pod (no GPU, 128Mi)
 │   │   ├── service-model.yaml    # ClusterIP :8000
 │   │   ├── service-ui.yaml       # ClusterIP :80
-│   │   ├── ingress.yaml          # ALB with path-based routing
+│   │   ├── ingress.yaml          # ALB with path-based routing + Cognito auth
 │   │   └── daemonset-model-cache.yaml  # S3 model download per node
 │   └── alb-controller/
 │       └── iam-policy.json       # ALB controller IAM permissions
@@ -324,6 +373,7 @@ python scripts/batch_process_fastapi.py \
 │   ├── setup-eks-prerequisites.sh # IAM, EFS, S3 setup
 │   ├── install-alb-controller.sh # ALB ingress controller
 │   ├── create-ecr-repos.sh       # Create ECR repositories
+│   ├── setup-cloudfront-auth.sh  # CloudFront + WAF + Cognito setup
 │   ├── verify-prerequisites.sh   # Check tools and access
 │   ├── check-gpu-availability.sh # GPU instance capacity check
 │   └── batch_process_fastapi.py  # Batch test against API
@@ -349,7 +399,11 @@ python scripts/batch_process_fastapi.py \
 - **S3 Bucket**: 17GB for model weights
 - **ECR**: Two repositories (~7GB total)
 - **IAM Role**: S3 read access via IRSA
-- **ACM Certificate**: For HTTPS (optional)
+- **ACM Certificate**: For HTTPS (must be in us-east-1 for CloudFront)
+- **CloudFront**: Distribution with custom origin header for origin verification
+- **WAF WebACL**: Regional, validates origin verify header on ALB
+- **Cognito User Pool**: OAuth2 authentication via ALB authenticate-cognito action
+- **Route 53**: DNS alias record pointing to CloudFront distribution
 
 ## Troubleshooting
 
@@ -381,6 +435,16 @@ livenessProbe:
 ```
 
 Redeploy after changing: `kubectl apply -k k8s/base/`
+
+**403 Forbidden when accessing the application directly via ALB**
+WAF WebACL is blocking the request because the `X-Origin-Verify` header is
+missing. All traffic must go through CloudFront, which injects this header.
+Access the application via the CloudFront domain or your custom domain.
+
+**302 redirect loop after login**
+Ensure the Cognito app client callback URL matches your domain exactly:
+`https://your-domain.example.com/oauth2/idpresponse`. Also verify the
+CloudFront origin request policy forwards all cookies (use `AllViewer` policy).
 
 **504 Gateway Timeout from ALB**
 The ALB idle timeout (default 60s) may be shorter than your inference time.

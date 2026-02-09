@@ -17,6 +17,20 @@ chmod +x scripts/*.sh   # Ensure scripts are executable
 | `create-ecr-repos.sh` | Create ECR repositories for UI and model images |
 | `setup-eks-prerequisites.sh` | Setup IAM roles (IRSA), EFS, S3 access |
 | `install-alb-controller.sh` | Install AWS ALB ingress controller on EKS |
+| `setup-cloudfront-auth.sh` | Setup CloudFront + WAF + Cognito authentication |
+
+### CloudFront Authentication
+
+`setup-cloudfront-auth.sh` creates the full CloudFront + WAF + Cognito stack:
+
+1. Retrieves Cognito User Pool info and domain
+2. Creates a new Cognito app client for ALB integration
+3. Generates an origin verify secret and stores it in SSM Parameter Store
+4. Creates a CloudFront distribution with the origin verify header
+5. Updates Route 53 DNS to point to CloudFront
+6. Creates a WAF WebACL and associates it with the ALB
+
+Requires `.env` variables: `COGNITO_USER_POOL_ID`, `APP_DOMAIN`, `ALB_NAME`.
 
 ## Build and Push
 
@@ -44,6 +58,15 @@ chmod +x scripts/*.sh   # Ensure scripts are executable
 | ------ | ------- |
 | `batch_process_fastapi.py` | Batch process `samples_images/` via FastAPI endpoint |
 
+> **Note**: With CloudFront + Cognito auth enabled, use `kubectl port-forward`
+> to connect directly to the model service. The public URL requires browser login.
+>
+> ```bash
+> kubectl port-forward -n qwen svc/qwen-model-service 8000:8000 &
+> sleep 3
+> python scripts/batch_process_fastapi.py --url http://localhost:8000
+> ```
+
 ## Shared
 
 | Script | Purpose |
@@ -65,7 +88,11 @@ chmod +x scripts/*.sh   # Ensure scripts are executable
 # 4. Deploy to EKS
 ./scripts/deploy.sh
 
-# 5. Test
-kubectl port-forward -n qwen svc/qwen-model-service 8000:8000
-python scripts/batch_process_fastapi.py
+# 5. Setup CloudFront authentication (optional)
+./scripts/setup-cloudfront-auth.sh
+
+# 6. Test (port-forward bypasses CloudFront/Cognito auth)
+kubectl port-forward -n qwen svc/qwen-model-service 8000:8000 &
+sleep 3
+python scripts/batch_process_fastapi.py --url http://localhost:8000
 ```

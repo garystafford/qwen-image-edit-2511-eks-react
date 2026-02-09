@@ -6,7 +6,6 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/inbound-cidrs: PLACEHOLDER_ALLOWED_IP_CIDR
     alb.ingress.kubernetes.io/healthcheck-path: /healthz
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
@@ -17,6 +16,14 @@ metadata:
     alb.ingress.kubernetes.io/certificate-arn: PLACEHOLDER_CERTIFICATE_ARN
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
+    # Cognito authentication
+    alb.ingress.kubernetes.io/auth-type: cognito
+    alb.ingress.kubernetes.io/auth-idp-cognito: PLACEHOLDER_COGNITO_IDP_CONFIG
+    alb.ingress.kubernetes.io/auth-on-unauthenticated-request: authenticate
+    alb.ingress.kubernetes.io/auth-scope: openid
+    alb.ingress.kubernetes.io/auth-session-timeout: '43200'
+    # WAF WebACL for origin verification (blocks non-CloudFront traffic)
+    alb.ingress.kubernetes.io/wafv2-acl-arn: PLACEHOLDER_WAF_ACL_ARN
   labels:
     app: qwen
 spec:
