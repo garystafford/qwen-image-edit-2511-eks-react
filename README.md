@@ -1,7 +1,6 @@
-# Qwen Image Edit 2511 - EKS Deployment
+# Qwen Image Edit 2511 Deployment to Amazon EKS
 
-AI-powered image editing using the Qwen Vision Language Model,
-deployed on Amazon EKS with GPU acceleration.
+AI-powered image editing using the Qwen Vision Language Model, deployed on Amazon EKS with GPU acceleration. See the blog post, [Deploying Qwen Image Edit Model to Amazon EKS with GPU Acceleration](https://garystafford.medium.com/deploying-qwen-image-edit-model-to-amazon-eks-with-gpu-acceleration-d71c7f4fca61) for complete details.
 
 ![Preview](./screenshot.png)
 
