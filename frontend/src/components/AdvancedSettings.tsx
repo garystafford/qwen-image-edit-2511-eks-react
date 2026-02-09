@@ -1,9 +1,18 @@
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, RotateCcw } from 'lucide-react';
 import { Slider } from './Slider';
 import { Toggle } from './Toggle';
 import type { AdvancedSettings as SettingsType } from '../api/types';
+import { DEFAULT_SETTINGS } from '../api/types';
 import clsx from 'clsx';
+
+const DIMENSION_PRESETS = [
+  { label: '1:1', w: 1024, h: 1024 },
+  { label: '2:3', w: 1024, h: 1536 },
+  { label: '3:2', w: 1536, h: 1024 },
+  { label: '16:9', w: 1536, h: 864 },
+  { label: '9:16', w: 864, h: 1536 },
+] as const;
 
 interface AdvancedSettingsProps {
   settings: SettingsType;
@@ -28,16 +37,27 @@ export function AdvancedSettings({ settings, onChange }: AdvancedSettingsProps) 
 
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-      >
-        <span>Advanced Settings</span>
-        <ChevronDown
-          size={16}
-          className={clsx('transition-transform', isOpen && 'rotate-180')}
-        />
-      </button>
+      <div className="flex items-center">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex-1 flex items-center justify-between px-4 py-3 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+        >
+          <span>Advanced Settings</span>
+          <ChevronDown
+            size={16}
+            className={clsx('transition-transform', isOpen && 'rotate-180')}
+          />
+        </button>
+        {isOpen && (
+          <button
+            onClick={() => onChange(DEFAULT_SETTINGS)}
+            className="px-3 py-3 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+            title="Reset to defaults"
+          >
+            <RotateCcw size={14} />
+          </button>
+        )}
+      </div>
 
       {isOpen && (
         <div className="px-4 pb-4 space-y-5 border-t border-[var(--color-border)] pt-4">
@@ -115,9 +135,27 @@ export function AdvancedSettings({ settings, onChange }: AdvancedSettingsProps) 
               step={8}
             />
           </div>
-          <p className="text-xs text-[var(--color-text-secondary)] text-right -mt-3">
-            Output: {settings.width}&times;{settings.height} ({aspectRatio(settings.width, settings.height)})
-          </p>
+          <div className="flex items-center justify-between -mt-3">
+            <div className="flex gap-1.5">
+              {DIMENSION_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => onChange({ ...settings, width: p.w, height: p.h })}
+                  className={clsx(
+                    'px-2 py-0.5 text-xs rounded border transition-colors',
+                    settings.width === p.w && settings.height === p.h
+                      ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-accent)]/10'
+                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-text-primary)]'
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              {settings.width}&times;{settings.height} ({aspectRatio(settings.width, settings.height)})
+            </p>
+          </div>
 
           <Slider
             label="Images per Prompt"
