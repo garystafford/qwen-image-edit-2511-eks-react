@@ -20,10 +20,16 @@ spec:
         component: inference
     spec:
       serviceAccountName: qwen-s3-access
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: model
           image: PLACEHOLDER_MODEL_IMAGE
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
           ports:
             - containerPort: 8000
               name: fastapi

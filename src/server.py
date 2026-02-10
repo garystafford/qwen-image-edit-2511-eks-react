@@ -278,11 +278,12 @@ def run_fastapi():
                 total_time_seconds=round(time.time() - start_time, 2),
             )
         except Exception as e:
+            print(f"[API] Batch inference error: {e}")
             return BatchInferenceResponse(
                 success=False,
                 images=[],
                 total_time_seconds=round(time.time() - start_time, 2),
-                error=str(e),
+                error="Inference failed. Check server logs for details.",
             )
 
     def _sse_event(data: dict) -> str:
@@ -410,7 +411,7 @@ def run_fastapi():
                 print(f"[Stream] Error: {e}")
                 yield _sse_event({
                     "type": "error",
-                    "error": str(e),
+                    "error": "Inference failed. Check server logs for details.",
                 })
 
         return StreamingResponse(

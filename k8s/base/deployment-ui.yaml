@@ -7,7 +7,7 @@ metadata:
     app: qwen-ui
     component: frontend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: qwen-ui
@@ -20,7 +20,9 @@ spec:
       containers:
         - name: ui
           image: PLACEHOLDER_UI_IMAGE
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
           ports:
             - containerPort: 80
               name: http

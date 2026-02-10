@@ -30,18 +30,51 @@ echo "Namespace: $K8S_NAMESPACE"
 echo "S3 Bucket: $S3_BUCKET"
 echo ""
 
-# Step 1: Create IAM role for S3 access using IRSA
-echo "Step 1: Creating IAM role for S3 access (IRSA)..."
+# Step 1: Create scoped IAM policy and role for S3 access using IRSA
+echo "Step 1: Creating scoped IAM policy and role for S3 access (IRSA)..."
+
+POLICY_NAME="qwen-s3-model-read-${EKS_CLUSTER_NAME}"
+POLICY_DOC=$(cat <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${S3_BUCKET}",
+        "arn:aws:s3:::${S3_BUCKET}/*"
+      ]
+    }
+  ]
+}
+POLICY
+)
+
+# Create or update the scoped IAM policy
+POLICY_ARN=$(aws iam create-policy \
+	--policy-name "$POLICY_NAME" \
+	--policy-document "$POLICY_DOC" \
+	--region "$AWS_REGION" \
+	--query 'Policy.Arn' \
+	--output text 2>/dev/null || \
+	aws iam list-policies --query "Policies[?PolicyName=='${POLICY_NAME}'].Arn" --output text)
+
+echo "Using IAM policy: $POLICY_ARN"
+
 eksctl create iamserviceaccount \
 	--name "$SERVICE_ACCOUNT" \
 	--namespace "$K8S_NAMESPACE" \
 	--cluster "$EKS_CLUSTER_NAME" \
 	--region "$AWS_REGION" \
-	--attach-policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess \
+	--attach-policy-arn "$POLICY_ARN" \
 	--approve \
 	--override-existing-serviceaccounts
 
-echo "IAM service account created"
+echo "IAM service account created with scoped S3 policy"
 echo ""
 
 # Step 2: Setup EFS for shared model cache (optional but recommended for multi-pod)
