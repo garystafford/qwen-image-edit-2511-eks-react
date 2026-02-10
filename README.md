@@ -51,6 +51,19 @@ graph LR
     ALB -->|"HTTP/8000<br/>/api, /health"| Model["qwen-model-service<br/>ClusterIP :8000<br/>FastAPI pod"]
 ```
 
+### Batch Processing Access
+
+Batch inference via scripts or curl uses `kubectl port-forward` to connect directly to the model service, bypassing the CloudFront → WAF → Cognito chain. This is required because CloudFront's 60-second origin read timeout would kill long-running batch requests, and Cognito OAuth2 requires browser-based login.
+
+```mermaid
+graph LR
+    Dev(["Developer<br/>(CLI / Script)"]) -->|"kubectl<br/>port-forward"| PF["localhost:8000"]
+    PF -->|"HTTP/8000"| Model["qwen-model-service<br/>ClusterIP :8000<br/>FastAPI pod"]
+    Model --> GPU["Diffusion Pipeline<br/>NVIDIA L40S"]
+
+    style PF stroke-dasharray: 5 5
+```
+
 ## Deployment Flow
 
 ```mermaid
@@ -311,11 +324,11 @@ curl -X POST http://localhost:8000/api/v1/batch/infer \
 
 The React UI uses the **streaming endpoint** (`/api/v1/stream/infer`) which returns Server-Sent Events (SSE) with real-time progress updates. This avoids CloudFront's 60-second origin read timeout by sending the first byte immediately.
 
-### Batch Testing Script
+### Batch Processing
 
 The batch script processes all images in `samples_images/`
-against the FastAPI endpoint. Use `kubectl port-forward` to connect
-directly to the model service, bypassing CloudFront/Cognito auth.
+against the FastAPI batch endpoint. Use `kubectl port-forward` to connect
+directly to the model service (see [Batch Processing Access](#batch-processing-access) above).
 
 **Setup** (one-time):
 
