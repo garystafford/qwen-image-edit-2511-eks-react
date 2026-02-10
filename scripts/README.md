@@ -57,7 +57,20 @@ Requires `.env` variables: `COGNITO_USER_POOL_ID`, `APP_DOMAIN`, `ALB_NAME`.
 
 | Script | Purpose |
 | ------ | ------- |
+| `run-tests.sh` | End-to-end deployment tests (health, headers, security, inference) |
 | `batch_process_fastapi.py` | Batch process `samples_images/` via FastAPI endpoint |
+
+`run-tests.sh` validates the full deployed stack: pod health, service endpoints,
+nginx and CloudFront security headers, asset caching, NetworkPolicies, PDB,
+security contexts, and optionally GPU inference (both batch and SSE streaming).
+
+```bash
+# Infrastructure tests only (fast, no GPU needed)
+./scripts/run-tests.sh
+
+# Full suite including GPU inference
+./scripts/run-tests.sh --include-inference
+```
 
 > **Note**: With CloudFront + Cognito auth enabled, use `kubectl port-forward`
 > to connect directly to the model service. The public URL requires browser login.

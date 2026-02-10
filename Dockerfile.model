@@ -1,6 +1,9 @@
 # Model inference container (FastAPI + Qwen-Image-Edit model)
 # Heavy container with CUDA, PyTorch, transformers
 # Runs on GPU nodes
+#
+# Uses devel variant (not runtime) because kernels/triton JIT-compile
+# CUDA code at model load time, requiring nvcc headers and gcc.
 
 # =============================================================================
 # STAGE 1: Base layer (heavy ML dependencies - rarely changes)
@@ -54,7 +57,7 @@ FROM base AS app
 
 LABEL maintainer="gary.a.stafford@gmail.com" \
       app="qwen-image-edit-model" \
-      version="1.0" \
+      version="1.3" \
       description="Qwen Image Edit model inference service (FastAPI only)"
 
 # Install FastAPI dependencies

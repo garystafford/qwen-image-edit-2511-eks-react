@@ -37,7 +37,7 @@ data:
   # IAM and S3 Configuration
   # =============================================================================
   # CHANGE THESE: Create IAM role with S3 access and EKS trust policy
-  # Role needs: AmazonS3ReadOnlyAccess (or specific bucket permissions)
+  # Role needs: Scoped S3 policy (s3:GetObject + s3:ListBucket on your model bucket only)
   # Trust relationship: Allow eks.amazonaws.com to assume role with OIDC
   IAM_ROLE_ARN: "arn:aws:iam::YOUR-ACCOUNT-ID:role/qwen-s3-access-role"
 

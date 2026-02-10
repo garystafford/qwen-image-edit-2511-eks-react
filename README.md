@@ -70,7 +70,7 @@ graph LR
 
     env --> model_img
     env --> ui_img
-    model_img --> ECR["ECR<br/>qwen-model:1.2.0<br/>qwen-ui:1.2.0"]
+    model_img --> ECR["ECR<br/>qwen-model<br/>qwen-ui"]
     ui_img --> ECR
     kust --> EKS["EKS<br/>Namespace: qwen"]
     ECR --> EKS
@@ -234,6 +234,12 @@ kubectl get pods -n qwen -w
 
 # Check status
 make status
+
+# Run end-to-end tests
+./scripts/run-tests.sh
+
+# Include inference tests (requires GPU pod)
+./scripts/run-tests.sh --include-inference
 ```
 
 ## Makefile Commands
@@ -248,6 +254,8 @@ make logs                          # Tail all logs
 make logs-model                    # Tail model logs
 make logs-ui                       # Tail UI logs
 make port-forward                  # Port-forward to model service
+make test                          # Run deployment tests (no inference)
+make test-full                     # Run all tests including GPU inference
 make batch                         # Run batch test via port-forward
 make clean                         # Remove local artifacts
 ```
@@ -376,6 +384,8 @@ kill %1
 │   │   ├── service-model.yaml    # ClusterIP :8000
 │   │   ├── service-ui.yaml       # ClusterIP :80
 │   │   ├── ingress.yaml          # ALB with path-based routing + Cognito auth
+│   │   ├── pdb-ui.yaml           # PodDisruptionBudget for UI
+│   │   ├── networkpolicy.yaml    # Default-deny ingress + allow rules
 │   │   └── daemonset-model-cache.yaml  # S3 model download per node
 │   └── alb-controller/
 │       └── iam-policy.json       # ALB controller IAM permissions
@@ -391,6 +401,7 @@ kill %1
 │   ├── setup-cloudfront-auth.sh  # CloudFront + WAF + Cognito setup
 │   ├── verify-prerequisites.sh   # Check tools and access
 │   ├── check-gpu-availability.sh # GPU instance capacity check
+│   ├── run-tests.sh             # End-to-end deployment tests
 │   └── batch_process_fastapi.py  # Batch test against API
 └── samples_images/               # 18 test images + prompts
 ```
@@ -419,6 +430,25 @@ kill %1
 - **WAF WebACL**: Regional, validates origin verify header on ALB
 - **Cognito User Pool**: OAuth2 authentication via ALB authenticate-cognito action
 - **Route 53**: DNS alias record pointing to CloudFront distribution
+
+## Security
+
+Defense-in-depth measures applied across the stack:
+
+| Layer | Control |
+| --- | --- |
+| **Network edge** | CloudFront → WAF origin-verify header → ALB (HTTPS-only, no HTTP listener) |
+| **Authentication** | Cognito OAuth2 at ALB; all paths require login |
+| **WAF** | Blocks direct ALB access (missing origin header = 403) |
+| **ALB Security Group** | Inbound restricted to CloudFront IPs via AWS managed prefix list |
+| **NetworkPolicy** | Default-deny ingress; explicit allow on ports 80 (UI) and 8000 (model) only |
+| **Pod security** | Model: `runAsNonRoot`, `runAsUser: 1000`, `allowPrivilegeEscalation: false`; UI: `allowPrivilegeEscalation: false` |
+| **PodDisruptionBudget** | UI `minAvailable: 1` for zero-downtime node drains |
+| **Response headers** | nginx + CloudFront Managed-SecurityHeadersPolicy (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) |
+| **Error sanitization** | API returns generic error messages; details logged server-side only |
+| **IAM** | Scoped S3 policy (`s3:GetObject` + `s3:ListBucket` on model bucket only) via IRSA |
+| **Dependencies** | All Python packages pinned to exact versions in `requirements-base.txt` |
+| **Secrets management** | `config.yaml` and `.env` are `.gitignore`'d; only `*.example` templates are tracked |
 
 ## Troubleshooting
 

@@ -5,7 +5,7 @@ ifneq (,$(wildcard ./.env))
     ECR_REGISTRY = $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 endif
 
-.PHONY: help verify build-and-push-ui build-and-push-model build-and-push-all deploy port-forward status logs logs-ui logs-model clean batch lint lint-python lint-bash lint-markdown lint-frontend format
+.PHONY: help verify build-and-push-ui build-and-push-model build-and-push-all deploy port-forward status logs logs-ui logs-model clean test test-full batch lint lint-python lint-bash lint-markdown lint-frontend format
 
 # Default target
 help:
@@ -31,6 +31,8 @@ help:
 	@echo "  make port-forward    Start port-forward to model service"
 	@echo ""
 	@echo "Testing:"
+	@echo "  make test            Run deployment tests (no inference)"
+	@echo "  make test-full       Run all tests including GPU inference"
 	@echo "  make batch           Run batch test via port-forward (localhost:8000)"
 	@echo ""
 	@echo "Linting:"
@@ -107,7 +109,16 @@ logs-model:
 	@echo "Tailing model logs..."
 	kubectl logs -n $(K8S_NAMESPACE) -l app=qwen-model --tail=100 -f
 
-# Testing (requires active port-forward: make port-forward)
+# Testing
+test:
+	@echo "Running deployment tests..."
+	./scripts/run-tests.sh
+
+test-full:
+	@echo "Running full test suite (including inference)..."
+	./scripts/run-tests.sh --include-inference
+
+# Batch testing (requires active port-forward: make port-forward)
 batch:
 	@echo "Running batch test via port-forward (http://localhost:8000)..."
 	@echo "Ensure port-forward is active: make port-forward &"
