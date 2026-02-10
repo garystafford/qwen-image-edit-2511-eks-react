@@ -5,10 +5,10 @@ git+https://github.com/huggingface/diffusers.git@973a077c6a4e7e7a7ea61a84bedd29a
 torch==2.6.0
 torchvision==0.21.0
 torchaudio==2.6.0
-transformers
-accelerate
-safetensors
-sentencepiece
-kernels
-bitsandbytes
+transformers==5.1.0
+accelerate==1.12.0
+safetensors==0.7.0
+sentencepiece==0.2.1
+kernels==0.12.1
+bitsandbytes==0.49.1
 diffusers[torch]

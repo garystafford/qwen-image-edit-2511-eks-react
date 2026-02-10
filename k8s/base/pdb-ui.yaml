@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: qwen-ui-pdb
+  namespace: qwen
+  labels:
+    app: qwen-ui
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: qwen-ui

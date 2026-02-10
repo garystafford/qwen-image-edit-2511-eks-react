@@ -11,6 +11,8 @@ resources:
   - service-model.yaml
   - deployment-ui.yaml
   - service-ui.yaml
+  - pdb-ui.yaml
+  - networkpolicy.yaml
   - ingress.yaml
   - config.yaml
 

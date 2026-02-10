@@ -1,0 +1,47 @@
+---
+# Default deny all ingress traffic to the qwen namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: qwen
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# Allow ALB ingress controller to reach UI pods (port 80)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alb-to-ui
+  namespace: qwen
+spec:
+  podSelector:
+    matchLabels:
+      app: qwen-ui
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 80
+          protocol: TCP
+
+---
+# Allow ALB ingress controller to reach model pods (port 8000)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alb-to-model
+  namespace: qwen
+spec:
+  podSelector:
+    matchLabels:
+      app: qwen-model
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8000
+          protocol: TCP
