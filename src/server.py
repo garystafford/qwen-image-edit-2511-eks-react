@@ -115,8 +115,13 @@ def run_fastapi():
 
     @app.get("/")
     async def root():
-        """Root endpoint for ALB health checks"""
+        """Root endpoint."""
         return {"status": "ok", "service": "qwen-model-api"}
+
+    @app.get("/healthz")
+    async def healthz():
+        """Lightweight health check for ALB target group."""
+        return {"status": "ok"}
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     async def health_check():

@@ -24,6 +24,8 @@ metadata:
     alb.ingress.kubernetes.io/auth-session-timeout: '43200'
     # WAF WebACL for origin verification (blocks non-CloudFront traffic)
     alb.ingress.kubernetes.io/wafv2-acl-arn: PLACEHOLDER_WAF_ACL_ARN
+    # Security group restricting ALB inbound to CloudFront IPs only
+    alb.ingress.kubernetes.io/security-groups: PLACEHOLDER_ALB_SECURITY_GROUP
   labels:
     app: qwen
 spec:

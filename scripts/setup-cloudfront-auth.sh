@@ -13,7 +13,7 @@
 #
 # Usage: ./scripts/setup-cloudfront-auth.sh [step]
 #   No argument: runs all steps in sequence
-#   1-6: runs only the specified step
+#   1-7: runs only the specified step
 #
 # Steps:
 #   1  Retrieve Cognito User Pool info
@@ -22,6 +22,7 @@
 #   4  Create CloudFront distribution
 #   5  Update Route 53 DNS
 #   6  Create WAF WebACL and associate with ALB
+#   7  Create CloudFront-restricted security group for ALB
 
 usage() {
     echo "Usage: $(basename "$0") [step]"
@@ -35,6 +36,7 @@ usage() {
     echo "  4  Create CloudFront distribution"
     echo "  5  Update Route 53 DNS"
     echo "  6  Create WAF WebACL and associate with ALB"
+    echo "  7  Create CloudFront-restricted security group for ALB"
     echo ""
     echo "Run without arguments to execute all steps."
     echo "Run with a step number to execute only that step."
@@ -436,6 +438,95 @@ step_6() {
 }
 
 # ---------------------------------------------------------------------------
+# Step 7: Create CloudFront-only security group for ALB
+# ---------------------------------------------------------------------------
+step_7() {
+    echo "============================================================"
+    echo "Step 7: Creating CloudFront-restricted security group for ALB"
+    echo "============================================================"
+
+    SG_NAME="qwen-alb-cloudfront-only"
+
+    # Get ALB VPC
+    ALB_VPC=$(aws elbv2 describe-load-balancers \
+        --names "${ALB_NAME}" \
+        --region "${AWS_REGION}" \
+        --query 'LoadBalancers[0].VpcId' \
+        --output text)
+    echo "ALB VPC: ${ALB_VPC}"
+
+    # Check if security group already exists
+    EXISTING_SG=$(aws ec2 describe-security-groups \
+        --filters "Name=group-name,Values=${SG_NAME}" "Name=vpc-id,Values=${ALB_VPC}" \
+        --region "${AWS_REGION}" \
+        --query 'SecurityGroups[0].GroupId' \
+        --output text 2>/dev/null || true)
+
+    if [ -n "${EXISTING_SG}" ] && [ "${EXISTING_SG}" != "None" ]; then
+        echo "Security group already exists: ${EXISTING_SG}"
+        SG_ID="${EXISTING_SG}"
+    else
+        SG_ID=$(aws ec2 create-security-group \
+            --group-name "${SG_NAME}" \
+            --description "ALB inbound restricted to CloudFront origin-facing IPs only" \
+            --vpc-id "${ALB_VPC}" \
+            --region "${AWS_REGION}" \
+            --query 'GroupId' \
+            --output text)
+        echo "Created security group: ${SG_ID}"
+
+        # Get CloudFront managed prefix list
+        CF_PREFIX_LIST=$(aws ec2 describe-managed-prefix-lists \
+            --region "${AWS_REGION}" \
+            --filters "Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing" \
+            --query 'PrefixLists[0].PrefixListId' \
+            --output text)
+        echo "CloudFront prefix list: ${CF_PREFIX_LIST}"
+
+        # Allow inbound HTTPS (443) from CloudFront IPs only
+        aws ec2 authorize-security-group-ingress \
+            --group-id "${SG_ID}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=443,ToPort=443,PrefixListIds=[{PrefixListId=${CF_PREFIX_LIST},Description=CloudFront origin-facing IPs}]" \
+            --region "${AWS_REGION}"
+        echo "Added inbound rule: HTTPS 443 from CloudFront prefix list"
+    fi
+
+    # Ensure EKS cluster SG allows ALB to reach pods on target ports.
+    # When using a custom security-groups annotation, the ALB controller
+    # does not automatically add backend SG rules. We must explicitly
+    # allow the ALB SG to reach pod ports in the cluster SG.
+    CLUSTER_SG=$(aws eks describe-cluster \
+        --name "${EKS_CLUSTER_NAME}" \
+        --region "${AWS_REGION}" \
+        --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
+        --output text)
+    echo "EKS cluster SG: ${CLUSTER_SG}"
+
+    for PORT in 80 8000; do
+        EXISTING_RULE=$(aws ec2 describe-security-group-rules \
+            --filters "Name=group-id,Values=${CLUSTER_SG}" \
+            --region "${AWS_REGION}" \
+            --query "SecurityGroupRules[?FromPort==\`${PORT}\` && ToPort==\`${PORT}\` && ReferencedGroupInfo.GroupId=='${SG_ID}'].SecurityGroupRuleId" \
+            --output text 2>/dev/null || true)
+
+        if [ -n "${EXISTING_RULE}" ] && [ "${EXISTING_RULE}" != "None" ]; then
+            echo "Cluster SG already allows port ${PORT} from ALB SG"
+        else
+            aws ec2 authorize-security-group-ingress \
+                --group-id "${CLUSTER_SG}" \
+                --ip-permissions "IpProtocol=tcp,FromPort=${PORT},ToPort=${PORT},UserIdGroupPairs=[{GroupId=${SG_ID},Description=ALB CloudFront SG to pods}]" \
+                --region "${AWS_REGION}" > /dev/null
+            echo "Added cluster SG rule: port ${PORT} from ALB SG ${SG_ID}"
+        fi
+    done
+
+    echo ""
+    echo ">>> Update k8s/base/config.yaml ALB_SECURITY_GROUP with: ${SG_ID}"
+    echo ">>> Then run: kubectl apply -k k8s/base/"
+    echo ""
+}
+
+# ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------
 verify() {
@@ -491,6 +582,7 @@ case "${STEP}" in
     4) step_4 ;;
     5) step_5 ;;
     6) step_6 ;;
+    7) step_7 ;;
     all)
         step_1
         step_2
@@ -498,6 +590,7 @@ case "${STEP}" in
         step_4
         step_5
         step_6
+        step_7
         verify
         ;;
     verify) verify ;;

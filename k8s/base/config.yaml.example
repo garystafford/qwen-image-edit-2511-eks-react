@@ -72,6 +72,10 @@ data:
   # Created by: scripts/setup-cloudfront-auth.sh step 6
   WAF_ACL_ARN: "arn:aws:wafv2:YOUR-REGION:YOUR-ACCOUNT-ID:regional/webacl/YOUR-WEBACL-NAME/YOUR-WEBACL-ID"
 
+  # Security group restricting ALB inbound to CloudFront IPs only
+  # Created by: scripts/setup-cloudfront-auth.sh step 7
+  ALB_SECURITY_GROUP: "sg-YOUR-CLOUDFRONT-SG-ID"
+
   # =============================================================================
   # EKS Cluster Configuration
   # =============================================================================

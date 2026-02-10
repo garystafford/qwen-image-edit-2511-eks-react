@@ -152,3 +152,15 @@ replacements:
           name: qwen-ingress
         fieldPaths:
           - metadata.annotations.[alb.ingress.kubernetes.io/wafv2-acl-arn]
+
+  # Replace ALB Security Group in Ingress
+  - source:
+      kind: ConfigMap
+      name: deployment-config
+      fieldPath: data.ALB_SECURITY_GROUP
+    targets:
+      - select:
+          kind: Ingress
+          name: qwen-ingress
+        fieldPaths:
+          - metadata.annotations.[alb.ingress.kubernetes.io/security-groups]

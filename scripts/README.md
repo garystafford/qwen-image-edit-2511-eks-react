@@ -29,6 +29,7 @@ chmod +x scripts/*.sh   # Ensure scripts are executable
 4. Creates a CloudFront distribution with the origin verify header
 5. Updates Route 53 DNS to point to CloudFront
 6. Creates a WAF WebACL and associates it with the ALB
+7. Creates a CloudFront-restricted security group for the ALB (inbound limited to CloudFront IPs via AWS managed prefix list) and adds backend rules to the EKS cluster SG
 
 Requires `.env` variables: `COGNITO_USER_POOL_ID`, `APP_DOMAIN`, `ALB_NAME`.
 

@@ -31,7 +31,8 @@ graph TD
 | **UI** (React)      | ~25MB      | None                    | Interactive frontend |
 
 Separating UI from model allows fast UI iteration
-without rebuilding the heavy model container.
+without rebuilding the heavy model container. The model deployment uses a
+`Recreate` strategy since only one GPU pod can run at a time.
 
 ### TLS and Traffic Flow
 
@@ -212,8 +213,9 @@ Set up CloudFront + WAF + Cognito for production authentication:
 ```
 
 This creates a Cognito app client, CloudFront distribution with origin verify
-header, WAF WebACL to block direct ALB access, and Route 53 DNS records.
-See `scripts/README.md` for details.
+header, WAF WebACL to block direct ALB access, Route 53 DNS records, and a
+CloudFront-restricted security group for the ALB (inbound limited to CloudFront
+IPs only via the AWS managed prefix list). See `scripts/README.md` for details.
 
 ### 6. Verify
 
@@ -282,11 +284,12 @@ curl -X POST http://localhost:8000/api/v1/batch/infer \
   }'
 ```
 
-| Endpoint              | Method | Description                  |
-| --------------------- | ------ | ---------------------------- |
-| `/api/v1/health`      | GET    | Health check with GPU status |
-| `/api/v1/batch/infer` | POST   | Batch image inference        |
-| `/api/docs`           | GET    | Swagger UI documentation     |
+| Endpoint              | Method | Description                           |
+| --------------------- | ------ | ------------------------------------- |
+| `/healthz`            | GET    | ALB target group health check         |
+| `/api/v1/health`      | GET    | Detailed health check with GPU status |
+| `/api/v1/batch/infer` | POST   | Batch image inference                 |
+| `/api/docs`           | GET    | Swagger UI documentation              |
 
 ### Batch Testing Script
 
@@ -446,7 +449,22 @@ Ensure the Cognito app client callback URL matches your domain exactly:
 `https://your-domain.example.com/oauth2/idpresponse`. Also verify the
 CloudFront origin request policy forwards all cookies (use `AllViewer` policy).
 
-**504 Gateway Timeout from ALB**
+**504 Gateway Timeout from CloudFront**
+CloudFront returns 504 when it cannot reach the ALB origin. Check in order:
+
+1. **Pods not ready**: `kubectl get pods -n qwen` — model pod may be loading
+   (takes ~2 min after restart) or in CrashLoopBackOff.
+2. **ALB targets unhealthy**: Check target group health in the AWS console or
+   via `aws elbv2 describe-target-health`. Both the model (port 8000) and UI
+   (port 80) target groups must be healthy. Both services expose `/healthz`
+   for ALB health checks.
+3. **Security group misconfigured**: The ALB security group must allow inbound
+   443 from the CloudFront managed prefix list, and the EKS cluster security
+   group must allow the ALB SG to reach pods on ports 80 and 8000.
+4. **CloudFront origin stale**: If the ALB was recreated (new DNS name), update
+   the CloudFront distribution origin to match.
+
+**504 Gateway Timeout during inference**
 The ALB idle timeout (default 60s) may be shorter than your inference time.
 The ingress is configured with `idle_timeout.timeout_seconds=300`. If you
 need longer, update the value in `k8s/base/ingress.yaml`:
