@@ -38,6 +38,10 @@ without rebuilding the heavy model container. The model deployment uses a
 
 TLS terminates at CloudFront (viewer-facing) and again at the ALB (origin-facing). Internal cluster traffic uses plain HTTP. WAF validates the origin verify header before the ALB processes the request. Cognito authentication is handled at the ALB layer.
 
+The ALB listens on HTTPS/443 only (no HTTP/80 listener). Since the security group restricts inbound to port 443 from CloudFront IPs via the AWS managed prefix list, an HTTP listener would be unreachable and serve no purpose.
+
+The React UI uses an SSE streaming endpoint (`/api/v1/stream/infer`) instead of a traditional REST call. CloudFront enforces a 60-second origin read timeout (time to first byte), but GPU inference can take 30-120+ seconds. The streaming endpoint sends the first byte immediately upon receiving the request, then streams per-step progress events during inference, keeping the connection alive through CloudFront indefinitely.
+
 ```mermaid
 graph LR
     User(["User<br/>(Browser)"]) -->|"HTTPS/443"| CF["CloudFront<br/>TLS termination<br/>+ origin header"]
