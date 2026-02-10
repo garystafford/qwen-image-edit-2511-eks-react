@@ -11,7 +11,7 @@ graph TD
     Users(["USERS"]) --> R53["Route 53<br/>DNS"]
     R53 --> CF["CloudFront<br/>HTTPS · CDN<br/>Adds X-Origin-Verify header"]
     CF --> WAF["WAF WebACL<br/>Validates origin header<br/>Blocks direct ALB access"]
-    WAF --> ALB["ALB Ingress<br/>HTTPS/443"]
+    WAF --> ALB["ALB Ingress<br/>HTTPS-only/443"]
     ALB --> Cognito["Cognito<br/>User Pool<br/>OAuth2 login"]
     Cognito --> ALB
 
@@ -66,7 +66,7 @@ graph LR
 
     env --> model_img
     env --> ui_img
-    model_img --> ECR["ECR<br/>qwen-model:1.0.0<br/>qwen-ui:1.0.0"]
+    model_img --> ECR["ECR<br/>qwen-model:1.2.0<br/>qwen-ui:1.2.0"]
     ui_img --> ECR
     kust --> EKS["EKS<br/>Namespace: qwen"]
     ECR --> EKS
@@ -97,15 +97,20 @@ sequenceDiagram
     User->>Cognito: Login with credentials
     Cognito-->>ALB: Auth token (cookie)
     ALB->>UI: Serve React static files
-    UI->>CF: POST /api/v1/batch/infer<br/>(base64 image + prompt + params)
+    UI->>CF: POST /api/v1/stream/infer<br/>(base64 image + prompt + params)
     CF->>WAF: Forward API request
     WAF->>ALB: Allow request
     ALB->>API: Route /api to model service
+    API-->>UI: SSE: started (first byte < 60s)
     API->>API: Decode image, build pipeline args
     API->>GPU: Run diffusion (20 steps default)
+    loop Each denoising step
+        GPU-->>API: Step complete
+        API-->>UI: SSE: progress (step N / total)
+    end
     GPU-->>API: Generated image tensor
     API->>API: Encode result as base64
-    API-->>UI: JSON response (base64 image + seed)
+    API-->>UI: SSE: complete (base64 image + seed)
     UI->>UI: Decode and display result
     CF-->>User: Edited image
 ```
@@ -284,12 +289,15 @@ curl -X POST http://localhost:8000/api/v1/batch/infer \
   }'
 ```
 
-| Endpoint              | Method | Description                           |
-| --------------------- | ------ | ------------------------------------- |
-| `/healthz`            | GET    | ALB target group health check         |
-| `/api/v1/health`      | GET    | Detailed health check with GPU status |
-| `/api/v1/batch/infer` | POST   | Batch image inference                 |
-| `/api/docs`           | GET    | Swagger UI documentation              |
+| Endpoint               | Method | Description                                    |
+| ---------------------- | ------ | ---------------------------------------------- |
+| `/healthz`             | GET    | ALB target group health check                  |
+| `/api/v1/health`       | GET    | Detailed health check with GPU status          |
+| `/api/v1/stream/infer` | POST   | SSE streaming inference (used by React UI)     |
+| `/api/v1/batch/infer`  | POST   | Batch inference (used by scripts and curl)     |
+| `/api/docs`            | GET    | Swagger UI documentation                       |
+
+The React UI uses the **streaming endpoint** (`/api/v1/stream/infer`) which returns Server-Sent Events (SSE) with real-time progress updates. This avoids CloudFront's 60-second origin read timeout by sending the first byte immediately.
 
 ### Batch Testing Script
 
@@ -465,15 +473,15 @@ CloudFront returns 504 when it cannot reach the ALB origin. Check in order:
    the CloudFront distribution origin to match.
 
 **504 Gateway Timeout during inference**
-The ALB idle timeout (default 60s) may be shorter than your inference time.
-The ingress is configured with `idle_timeout.timeout_seconds=300`. If you
-need longer, update the value in `k8s/base/ingress.yaml`:
+CloudFront has a 60-second origin read timeout (time to first byte). The React
+UI uses SSE streaming (`/api/v1/stream/infer`) which sends the first byte
+immediately, avoiding this limit. If you see 504s during inference:
 
-```yaml
-alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=600
-```
-
-Redeploy after changing: `kubectl apply -k k8s/base/`
+1. Verify the UI is hitting `/api/v1/stream/infer` (not the batch endpoint)
+2. Check that the ALB idle timeout exceeds your longest inference — the ingress
+   is configured with `idle_timeout.timeout_seconds=300`
+3. If using scripts/curl with the batch endpoint (`/api/v1/batch/infer`), use
+   `kubectl port-forward` to bypass CloudFront entirely
 
 ## Resources
 

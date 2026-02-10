@@ -1,5 +1,6 @@
 import { Download, Loader2 } from 'lucide-react';
 import type { ImageOutput } from '../api/types';
+import type { InferenceProgress } from '../hooks/useImageEdit';
 
 interface ResultGalleryProps {
   results: ImageOutput[];
@@ -7,6 +8,7 @@ interface ResultGalleryProps {
   elapsedTime: number | null;
   error: string | null;
   loadingSeconds: number;
+  progress: InferenceProgress | null;
 }
 
 function downloadImage(base64: string, index: number) {
@@ -16,7 +18,7 @@ function downloadImage(base64: string, index: number) {
   link.click();
 }
 
-export function ResultGallery({ results, isLoading, elapsedTime, error, loadingSeconds }: ResultGalleryProps) {
+export function ResultGallery({ results, isLoading, elapsedTime, error, loadingSeconds, progress }: ResultGalleryProps) {
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] min-h-[300px] h-full flex flex-col">
       <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border)]">
@@ -32,7 +34,19 @@ export function ResultGallery({ results, isLoading, elapsedTime, error, loadingS
         {isLoading && (
           <div className="flex flex-col items-center gap-3 text-[var(--color-text-secondary)]">
             <Loader2 size={32} className="animate-spin text-[var(--color-accent)]" />
-            <p className="text-sm">Generating...</p>
+            {progress ? (
+              <>
+                <p className="text-sm">Step {progress.step} / {progress.totalSteps}</p>
+                <div className="w-48 h-1.5 bg-[var(--color-border)] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[var(--color-accent)] transition-all duration-300"
+                    style={{ width: `${(progress.step / progress.totalSteps) * 100}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="text-sm">Generating...</p>
+            )}
             <p className="text-xs font-mono tabular-nums">{loadingSeconds}s elapsed</p>
           </div>
         )}

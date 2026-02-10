@@ -30,6 +30,13 @@ export interface InferenceResponse {
   error: string | null;
 }
 
+export type StreamEvent =
+  | { type: 'started'; total_steps: number }
+  | { type: 'progress'; step: number; total_steps: number }
+  | { type: 'heartbeat' }
+  | { type: 'complete'; success: true; images: ImageOutput[]; total_time_seconds: number }
+  | { type: 'error'; error: string };
+
 export interface HealthResponse {
   status: string;
   model_loaded: boolean;

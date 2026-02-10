@@ -49,10 +49,14 @@ def run_fastapi():
     import time
     from typing import List, Optional
 
+    import json
+    import queue
+
     import uvicorn
     from fastapi import FastAPI, HTTPException
     from PIL import Image
     from pydantic import BaseModel, Field
+    from starlette.responses import StreamingResponse
 
     MAX_SEED = np.iinfo(np.int32).max
     DEFAULT_NEGATIVE_PROMPT = (
@@ -152,21 +156,34 @@ def run_fastapi():
         generator: torch.Generator,
         guidance_scale: float,
         num_images_per_prompt: int,
+        callback=None,
     ) -> list:
         """Run the diffusion pipeline (blocking). Called via asyncio.to_thread()
         so the event loop stays free for health checks during inference."""
+        pipe_kwargs = {
+            "image": pil_images,
+            "prompt": prompt,
+            "height": height,
+            "width": width,
+            "negative_prompt": negative_prompt,
+            "num_inference_steps": num_inference_steps,
+            "generator": generator,
+            "true_cfg_scale": guidance_scale,
+            "num_images_per_prompt": num_images_per_prompt,
+        }
+        if callback is not None:
+            pipe_kwargs["callback_on_step_end"] = callback
+
         try:
-            result = pipe(
-                image=pil_images,
-                prompt=prompt,
-                height=height,
-                width=width,
-                negative_prompt=negative_prompt,
-                num_inference_steps=num_inference_steps,
-                generator=generator,
-                true_cfg_scale=guidance_scale,
-                num_images_per_prompt=num_images_per_prompt,
-            ).images
+            result = pipe(**pipe_kwargs).images
+        except TypeError as e:
+            if "callback_on_step_end" in str(e) and callback is not None:
+                # Pipeline doesn't support step callbacks — fall back
+                print("[API] callback_on_step_end not supported, falling back")
+                del pipe_kwargs["callback_on_step_end"]
+                result = pipe(**pipe_kwargs).images
+            else:
+                raise
         except IndexError:
             # Workaround for off-by-one bug in the scheduler's sigma lookup
             # that triggers with certain num_inference_steps values.
@@ -175,17 +192,8 @@ def run_fastapi():
                 f"[API] Scheduler IndexError at steps={num_inference_steps}, "
                 f"retrying with steps={adjusted}"
             )
-            result = pipe(
-                image=pil_images,
-                prompt=prompt,
-                height=height,
-                width=width,
-                negative_prompt=negative_prompt,
-                num_inference_steps=adjusted,
-                generator=generator,
-                true_cfg_scale=guidance_scale,
-                num_images_per_prompt=num_images_per_prompt,
-            ).images
+            pipe_kwargs["num_inference_steps"] = adjusted
+            result = pipe(**pipe_kwargs).images
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -276,6 +284,143 @@ def run_fastapi():
                 total_time_seconds=round(time.time() - start_time, 2),
                 error=str(e),
             )
+
+    def _sse_event(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    @app.post("/api/v1/stream/infer")
+    async def stream_infer(request: BatchInferenceRequest):
+        """SSE streaming inference — sends first byte immediately to avoid
+        CloudFront 60s origin read timeout."""
+        if pipe is None:
+            raise HTTPException(status_code=503, detail="Model not loaded")
+
+        async def event_stream():
+            # First byte within milliseconds — resets CloudFront timeout
+            yield _sse_event({
+                "type": "started",
+                "total_steps": request.num_inference_steps,
+            })
+
+            start_time = time.time()
+
+            try:
+                # Decode input images
+                pil_images = []
+                for idx, img_input in enumerate(request.images):
+                    pil_images.append(decode_base64_image(img_input.data))
+                    print(f"[Stream] Loaded image {idx + 1}/{len(request.images)}")
+
+                seed = (
+                    random.randint(0, MAX_SEED)
+                    if request.randomize_seed
+                    else request.seed
+                )
+                generator = torch.Generator(device=device).manual_seed(seed)
+
+                mode_str = (
+                    "style reference mode"
+                    if request.style_reference_mode
+                    else "batch mode"
+                )
+                print(
+                    f"[Stream] Processing {len(pil_images)} images "
+                    f"({mode_str}), seed={seed}"
+                )
+
+                # Thread-safe queue for per-step progress from pipeline callback
+                progress_q: queue.Queue[int] = queue.Queue()
+
+                def step_callback(_pipe, step_index, _timestep, kwargs):
+                    progress_q.put(step_index + 1)  # 1-indexed
+                    return kwargs
+
+                # Run inference in thread pool
+                loop = asyncio.get_event_loop()
+                future = loop.run_in_executor(
+                    None,
+                    _run_inference,
+                    pil_images,
+                    request.prompt,
+                    request.height,
+                    request.width,
+                    request.negative_prompt,
+                    request.num_inference_steps,
+                    generator,
+                    request.guidance_scale,
+                    request.num_images_per_prompt,
+                    step_callback,
+                )
+
+                # Stream progress/heartbeats while inference runs
+                while not future.done():
+                    await asyncio.sleep(1)
+                    got_progress = False
+                    while not progress_q.empty():
+                        try:
+                            step = progress_q.get_nowait()
+                            got_progress = True
+                            yield _sse_event({
+                                "type": "progress",
+                                "step": step,
+                                "total_steps": request.num_inference_steps,
+                            })
+                        except queue.Empty:
+                            break
+                    if not got_progress:
+                        yield _sse_event({"type": "heartbeat"})
+
+                result = future.result()
+                print(
+                    f"[Stream] Received {len(result)} output images from pipeline"
+                )
+
+                # Encode output images (same logic as batch endpoint)
+                output_images = []
+                if request.style_reference_mode:
+                    if result:
+                        output_images.append({
+                            "data": encode_image_base64(result[-1]),
+                            "seed": seed,
+                            "index": 0,
+                        })
+                        print(
+                            f"[Stream] Style reference mode: "
+                            f"Returning final image (last of {len(result)})"
+                        )
+                else:
+                    for idx, img in enumerate(result):
+                        output_images.append({
+                            "data": encode_image_base64(img),
+                            "seed": seed,
+                            "index": idx,
+                        })
+                    print(
+                        f"[Stream] Batch mode: Returning all {len(result)} images"
+                    )
+
+                yield _sse_event({
+                    "type": "complete",
+                    "success": True,
+                    "images": output_images,
+                    "total_time_seconds": round(time.time() - start_time, 2),
+                })
+
+            except Exception as e:
+                print(f"[Stream] Error: {e}")
+                yield _sse_event({
+                    "type": "error",
+                    "error": str(e),
+                })
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     print("[Server] Starting FastAPI on port 8000...")
     uvicorn.run(app, host="0.0.0.0", port=8000)

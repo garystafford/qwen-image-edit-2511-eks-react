@@ -1,4 +1,4 @@
-import type { HealthResponse, InferenceRequest, InferenceResponse } from './types';
+import type { HealthResponse, InferenceRequest, InferenceResponse, StreamEvent } from './types';
 
 const API_BASE = '/api/v1';
 
@@ -11,8 +11,9 @@ export async function checkHealth(signal?: AbortSignal): Promise<HealthResponse>
 export async function submitInference(
   request: InferenceRequest,
   signal?: AbortSignal,
+  onProgress?: (step: number, totalSteps: number) => void,
 ): Promise<InferenceResponse> {
-  const res = await fetch(`${API_BASE}/batch/infer`, {
+  const res = await fetch(`${API_BASE}/stream/infer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -22,7 +23,48 @@ export async function submitInference(
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);
   }
-  return res.json();
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: InferenceResponse | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Parse complete SSE events from buffer
+    while (true) {
+      const idx = buffer.indexOf('\n\n');
+      if (idx === -1) break;
+      const raw = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+
+      for (const line of raw.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const event: StreamEvent = JSON.parse(line.slice(6));
+        switch (event.type) {
+          case 'progress':
+            onProgress?.(event.step, event.total_steps);
+            break;
+          case 'complete':
+            result = {
+              success: true,
+              images: event.images,
+              total_time_seconds: event.total_time_seconds,
+              error: null,
+            };
+            break;
+          case 'error':
+            throw new Error(event.error);
+        }
+      }
+    }
+  }
+
+  if (!result) throw new Error('Stream ended without result');
+  return result;
 }
 
 export async function fileToBase64(file: File): Promise<string> {

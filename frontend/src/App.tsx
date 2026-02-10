@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS } from './api/types';
 
 export default function App() {
   const { health, error: healthError } = useHealthCheck();
-  const { isLoading, results, error, elapsedTime, submit, cancel, clearResults } = useImageEdit();
+  const { isLoading, results, error, elapsedTime, progress, submit, cancel, clearResults } = useImageEdit();
 
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [prompt, setPrompt] = useState('');
@@ -103,6 +103,7 @@ export default function App() {
             elapsedTime={elapsedTime}
             error={error}
             loadingSeconds={loadingSeconds}
+            progress={progress}
           />
         </div>
 

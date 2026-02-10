@@ -12,10 +12,9 @@ metadata:
     alb.ingress.kubernetes.io/success-codes: '200'
     alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
     alb.ingress.kubernetes.io/load-balancer-name: qwen-alb
-    # HTTPS configuration
+    # HTTPS configuration (HTTPS-only — SG restricts inbound to 443 from CloudFront)
     alb.ingress.kubernetes.io/certificate-arn: PLACEHOLDER_CERTIFICATE_ARN
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
     # Cognito authentication
     alb.ingress.kubernetes.io/auth-type: cognito
     alb.ingress.kubernetes.io/auth-idp-cognito: PLACEHOLDER_COGNITO_IDP_CONFIG
