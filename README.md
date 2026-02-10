@@ -434,7 +434,7 @@ kill %1
 ## AWS Requirements
 
 - **EKS Cluster**: v1.28+
-- **Node Group**: `g6e.xlarge` (NVIDIA L40S, 48GB VRAM), 100GB EBS
+- **Node Group**: `g6e.2xlarge` (NVIDIA L40S, 46GB VRAM), 300GB EBS
 - **S3 Bucket**: 17GB for model weights
 - **ECR**: Two repositories (~7GB total)
 - **IAM Role**: S3 read access via IRSA
