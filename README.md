@@ -57,7 +57,7 @@ Batch inference via scripts or curl uses `kubectl port-forward` to connect direc
 
 ```mermaid
 graph LR
-    Dev(["Developer<br/>(CLI / Script)"]) -->|"kubectl<br/>port-forward"| PF["localhost:8000"]
+    User(["User<br/>(CLI / Script)"]) -->|"kubectl<br/>port-forward"| PF["localhost:8000"]
     PF -->|"HTTP/8000"| Model["qwen-model-service<br/>ClusterIP :8000<br/>FastAPI pod"]
     Model --> GPU["Diffusion Pipeline<br/>NVIDIA L40S"]
 
