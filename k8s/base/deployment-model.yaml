@@ -76,6 +76,7 @@ spec:
             type: Directory
       nodeSelector:
         nvidia.com/gpu.present: "true"
+        workload: "gpu-pool"
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists

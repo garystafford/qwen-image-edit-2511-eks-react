@@ -15,6 +15,7 @@ spec:
       serviceAccountName: qwen-s3-access
       nodeSelector:
         nvidia.com/gpu.present: "true"
+        workload: "gpu-pool"
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists
