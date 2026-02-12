@@ -75,8 +75,7 @@ spec:
             path: /mnt/qwen-models
             type: Directory
       nodeSelector:
-        nvidia.com/gpu.present: "true"
-        workload: "gpu-pool"
+        workload: qwen
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists
