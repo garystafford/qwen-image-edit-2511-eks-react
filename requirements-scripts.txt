@@ -1,0 +1,4 @@
+# Dependencies for local scripts (not container builds)
+# Install with: pip install -r requirements-scripts.txt
+
+huggingface_hub>=0.20.0
