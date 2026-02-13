@@ -94,7 +94,12 @@ def upload_to_s3(local_dir, s3_bucket, s3_prefix, aws_region):
     print(f"Local directory: {local_dir}")
 
     s3_uri = f"s3://{s3_bucket}/{s3_prefix}/"
-    cmd = ["aws", "s3", "sync", local_dir, s3_uri, "--region", aws_region]
+    cmd = [
+        "aws", "s3", "sync", local_dir, s3_uri,
+        "--region", aws_region,
+        "--exclude", ".cache/*",
+        "--exclude", ".download_complete",
+    ]
 
     print(f"Running: {' '.join(cmd)}")
 
