@@ -59,29 +59,34 @@ def validate_env():
         sys.exit(1)
 
 
-def is_model_cached(local_dir):
-    """Check if a model directory already has downloaded files."""
-    if not os.path.isdir(local_dir):
-        return False
-    # Check for safetensors or model_index.json as evidence of a completed download
-    has_safetensors = glob.glob(os.path.join(local_dir, "**", "*.safetensors"), recursive=True)
-    has_index = os.path.exists(os.path.join(local_dir, "model_index.json"))
-    return bool(has_safetensors) or has_index
-
-
 def download_model(model_id, local_dir):
-    """Download model from HuggingFace to a local directory."""
+    """Download model from HuggingFace to a local directory.
+
+    Uses a .download_complete marker file to track successful downloads.
+    If the marker is missing, snapshot_download runs and resumes any
+    partial downloads automatically.
+    """
     from huggingface_hub import snapshot_download
 
-    if is_model_cached(local_dir):
+    marker = os.path.join(local_dir, ".download_complete")
+
+    if os.path.exists(marker):
         print(f"  Already cached: {local_dir} (skipping download)")
         return local_dir
 
     print(f"Downloading {model_id} from HuggingFace...")
+    if os.path.isdir(local_dir):
+        print(f"  Resuming incomplete download in {local_dir}...")
+
     snapshot_download(
         repo_id=model_id,
         local_dir=local_dir,
     )
+
+    # Mark download as complete
+    with open(marker, "w") as f:
+        f.write(f"{model_id}\n")
+
     print(f"  Downloaded to: {local_dir}")
     return local_dir
 

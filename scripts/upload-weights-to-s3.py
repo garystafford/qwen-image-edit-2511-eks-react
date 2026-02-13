@@ -48,34 +48,28 @@ def validate_env():
         sys.exit(1)
 
 
-def is_model_cached(local_cache_dir, model_id):
-    """Check if a model is already downloaded in the cache."""
-    import glob
-
-    model_cache_name = model_id.replace("/", "--")
-    model_cache_dir = os.path.join(local_cache_dir, "hub", f"models--{model_cache_name}")
-    if not os.path.isdir(model_cache_dir):
-        return False
-    has_safetensors = glob.glob(
-        os.path.join(model_cache_dir, "**", "*.safetensors"), recursive=True
-    )
-    return bool(has_safetensors)
-
-
 def download_model(model_id, local_cache_dir):
-    """Download model from HuggingFace to local cache."""
+    """Download model from HuggingFace to local cache.
+
+    Uses a .download_complete marker file to track successful downloads.
+    If the marker is missing, snapshot_download runs and resumes any
+    partial downloads automatically.
+    """
     from huggingface_hub import snapshot_download
 
     # Find the model directory in cache
     model_cache_name = model_id.replace("/", "--")
     cache_dir = os.path.join(local_cache_dir, "hub")
     model_cache_dir = os.path.join(cache_dir, f"models--{model_cache_name}")
+    marker = os.path.join(model_cache_dir, ".download_complete")
 
-    if is_model_cached(local_cache_dir, model_id):
+    if os.path.exists(marker):
         print(f"  Already cached: {model_cache_dir} (skipping download)")
         return model_cache_dir
 
     print(f"Downloading {model_id} from HuggingFace...")
+    if os.path.isdir(model_cache_dir):
+        print(f"  Resuming incomplete download in {model_cache_dir}...")
 
     # Use cache_dir to get proper HuggingFace cache structure
     # This creates: cache_dir/models--{org}--{model}/snapshots/{hash}/
@@ -84,6 +78,11 @@ def download_model(model_id, local_cache_dir):
         cache_dir=cache_dir,
         local_dir_use_symlinks=False,  # Copy files instead of symlinks for S3
     )
+
+    # Mark download as complete
+    os.makedirs(model_cache_dir, exist_ok=True)
+    with open(marker, "w") as f:
+        f.write(f"{model_id}\n")
 
     print(f"Model downloaded to cache: {model_cache_dir}")
     return model_cache_dir
