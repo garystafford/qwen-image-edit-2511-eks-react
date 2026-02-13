@@ -1,6 +1,6 @@
 # Scripts
 
-All scripts source `common.sh`, which reads `.env` from the project root. No AWS-specific values are hardcoded.
+All shell scripts source `common.sh`, which reads `.env` from the project root. Python scripts load `.env` directly. No AWS-specific values are hardcoded.
 
 ## Prerequisites
 
@@ -18,6 +18,7 @@ chmod +x scripts/*.sh   # Ensure scripts are executable
 | `setup-eks-prerequisites.sh` | Setup IAM roles (IRSA), EFS, S3 access |
 | `install-alb-controller.sh` | Install AWS ALB ingress controller on EKS |
 | `setup-cloudfront-auth.sh` | Setup CloudFront + WAF + Cognito authentication |
+| `upload-weights-to-s3.py` | Download model from HuggingFace and upload to S3 |
 
 ### CloudFront Authentication
 
@@ -96,16 +97,19 @@ security contexts, and optionally GPU inference (both batch and SSE streaming).
 # 2. Create ECR repos
 ./scripts/create-ecr-repos.sh
 
-# 3. Build and push both containers
+# 3. Upload model weights to S3
+python scripts/upload-weights-to-s3.py
+
+# 4. Build and push both containers
 ./scripts/build-and-push-all.sh v1
 
-# 4. Deploy to EKS
+# 5. Deploy to EKS
 ./scripts/deploy.sh
 
-# 5. Setup CloudFront authentication (optional)
+# 6. Setup CloudFront authentication (optional)
 ./scripts/setup-cloudfront-auth.sh
 
-# 6. Test (port-forward bypasses CloudFront/Cognito auth)
+# 7. Test (port-forward bypasses CloudFront/Cognito auth)
 kubectl port-forward -n qwen svc/qwen-model-service 8000:8000 &
 sleep 3
 python scripts/batch_process_fastapi.py --url http://localhost:8000
