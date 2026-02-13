@@ -5,6 +5,7 @@ FastAPI model inference server (port 8000).
 Loads model once, serves batch inference and health-check endpoints.
 """
 
+import json
 import os
 
 # --- Model Loading (shared by both servers) ---
@@ -17,26 +18,125 @@ print("[Server] Starting model load...")
 dtype = torch.bfloat16
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+model_path = os.environ.get("MODEL_PATH", "")
 model_cache_dir = os.environ.get("TRANSFORMERS_CACHE", "/models")
-model_cache_path = os.path.join(
-    model_cache_dir, "models--ovedrive--Qwen-Image-Edit-2511-4bit"
-)
-snapshot_path = os.path.join(
-    model_cache_path, "snapshots", "4104233c114f9b7b2e9c235d72ae4d216720aaac"
-)
 
-if os.path.exists(snapshot_path):
-    print(f"[Server] Loading model from node-local cache: {snapshot_path}")
-    pretrained_id = snapshot_path
-    load_kwargs = {"torch_dtype": dtype}
+
+def _is_df11_model(path):
+    """Check if the transformer directory contains DF11 compressed weights."""
+    config_file = os.path.join(path, "transformer", "config.json")
+    if not os.path.exists(config_file):
+        return False
+    with open(config_file) as f:
+        return "dfloat11_config" in json.load(f)
+
+
+def _load_df11_pipeline(path):
+    """Load a pipeline with DF11-compressed transformer weights.
+
+    Follows the official approach from the HuggingFace model card:
+    1. Create transformer, load DF11 weights (device="cpu")
+    2. Build pipeline with the DF11-hooked transformer
+    3. enable_model_cpu_offload() handles all device management
+
+    enable_model_cpu_offload() moves each component to GPU only when its
+    forward() is called, then offloads it back. Peak VRAM: ~30 GB.
+    Expected inference time: ~100s (A100 benchmark from model card).
+    """
+    from dfloat11 import DFloat11Model
+    from diffusers.models import QwenImageTransformer2DModel
+
+    transformer_path = os.path.join(path, "transformer")
+
+    # 1. Create transformer on meta device (zero memory), then materialize on CPU in bf16.
+    #    The RoPE embedding classes (QwenEmbedRope, QwenEmbedLayer3DRope) store pos_freqs
+    #    and neg_freqs as plain attributes (not register_buffer, because complex numbers
+    #    lose their imaginary part). to_empty() won't materialize these, so we recompute
+    #    them after materialization.
+    print("[Server] Creating transformer from config (meta device)...")
+    config = QwenImageTransformer2DModel.load_config(transformer_path)
+    with torch.device("meta"):
+        transformer = QwenImageTransformer2DModel.from_config(config)
+    transformer = transformer.to_empty(device="cpu").to(dtype)
+
+    # Recompute RoPE positional frequency tensors that were lost on meta device
+    recomputed = 0
+    for name, module in transformer.named_modules():
+        if hasattr(module, "pos_freqs") and module.pos_freqs.device == torch.device("meta"):
+            pos_index = torch.arange(4096)
+            neg_index = torch.arange(4096).flip(0) * -1 - 1
+            module.pos_freqs = torch.cat(
+                [module.rope_params(pos_index, dim, module.theta) for dim in module.axes_dim],
+                dim=1,
+            )
+            module.neg_freqs = torch.cat(
+                [module.rope_params(neg_index, dim, module.theta) for dim in module.axes_dim],
+                dim=1,
+            )
+            recomputed += 1
+    print(f"[Server] Recomputed RoPE buffers for {recomputed} modules")
+    transformer.eval()
+
+    # 2. Load DF11 compressed weights with device="cpu" (official approach).
+    #    This registers CuPy decode hooks and loads biases/norms from safetensors.
+    #    enable_model_cpu_offload() will move to GPU when forward() is called.
+    print("[Server] Loading DF11 compressed weights (device=cpu)...")
+    DFloat11Model.from_pretrained(
+        transformer_path,
+        bfloat16_model=transformer,
+        device="cpu",
+    )
+
+    # 3. Load the rest of the pipeline (text encoder, VAE, scheduler)
+    print("[Server] Loading pipeline components...")
+    pipeline = QwenImageEditPlusPipeline.from_pretrained(
+        path,
+        transformer=transformer,
+        torch_dtype=dtype,
+    )
+
+    # 4. Let accelerate manage all device placement (official approach).
+    #    Each component moves to GPU for its forward pass, then back to CPU.
+    print("[Server] Enabling model CPU offload (accelerate-managed)...")
+    pipeline.enable_model_cpu_offload()
+
+    if torch.cuda.is_available():
+        vram_gb = torch.cuda.memory_allocated() / (1024**3)
+        print(f"[Server] GPU memory after setup: {vram_gb:.1f} GB")
+
+    return pipeline
+
+
+if model_path and os.path.isdir(model_path) and _is_df11_model(model_path):
+    # DF11 compressed model (e.g., Qwen-Image-Edit-2511-DF11)
+    print(f"[Server] Loading DF11 model from: {model_path}")
+    pipe = _load_df11_pipeline(model_path)
+elif model_path and os.path.isdir(model_path):
+    # Direct path to a standard model directory
+    print(f"[Server] Loading model from MODEL_PATH: {model_path}")
+    pipe = QwenImageEditPlusPipeline.from_pretrained(
+        model_path, torch_dtype=dtype
+    ).to(device)
 else:
-    print("[Server] Loading model by ID: ovedrive/Qwen-Image-Edit-2511-4bit")
-    pretrained_id = "ovedrive/Qwen-Image-Edit-2511-4bit"
-    load_kwargs = {"torch_dtype": dtype, "cache_dir": model_cache_dir}
+    # Fall back to 4-bit HF cache layout
+    model_cache_path = os.path.join(
+        model_cache_dir, "models--ovedrive--Qwen-Image-Edit-2511-4bit"
+    )
+    snapshot_path = os.path.join(
+        model_cache_path, "snapshots", "4104233c114f9b7b2e9c235d72ae4d216720aaac"
+    )
+    if os.path.exists(snapshot_path):
+        print(f"[Server] Loading model from node-local cache: {snapshot_path}")
+        pretrained_id = snapshot_path
+        load_kwargs = {"torch_dtype": dtype}
+    else:
+        print("[Server] Loading model by ID: ovedrive/Qwen-Image-Edit-2511-4bit")
+        pretrained_id = "ovedrive/Qwen-Image-Edit-2511-4bit"
+        load_kwargs = {"torch_dtype": dtype, "cache_dir": model_cache_dir}
+    pipe = QwenImageEditPlusPipeline.from_pretrained(
+        pretrained_id, **load_kwargs
+    ).to(device)
 
-pipe = QwenImageEditPlusPipeline.from_pretrained(pretrained_id, **load_kwargs).to(
-    device
-)
 print("[Server] Model loaded successfully")
 
 
@@ -278,7 +378,9 @@ def run_fastapi():
                 total_time_seconds=round(time.time() - start_time, 2),
             )
         except Exception as e:
+            import traceback
             print(f"[API] Batch inference error: {e}")
+            traceback.print_exc()
             return BatchInferenceResponse(
                 success=False,
                 images=[],
@@ -408,7 +510,9 @@ def run_fastapi():
                 })
 
             except Exception as e:
+                import traceback
                 print(f"[Stream] Error: {e}")
+                traceback.print_exc()
                 yield _sse_event({
                     "type": "error",
                     "error": "Inference failed. Check server logs for details.",

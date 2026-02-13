@@ -1,0 +1,30 @@
+# Kustomize overlay for DF11 model testing
+# Patches the base deployment to use the DF11 (DFloat11) model variant
+#
+# Usage:
+#   kubectl apply -k k8s/df11/    # Deploy with DF11 model
+#   kubectl apply -k k8s/base/    # Revert to 4-bit model
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+# Override model image tag for DF11 (includes dfloat11 + cupy runtime)
+images:
+  - name: 676164205626.dkr.ecr.us-east-1.amazonaws.com/qwen-model
+    newTag: 1.6.3-df11
+
+patches:
+  # Patch DaemonSet: change S3 prefix and model directory for DF11
+  - target:
+      kind: DaemonSet
+      name: qwen-model-cache
+    path: patch-daemonset.yaml
+
+  # Patch Deployment: add MODEL_PATH env var, increase memory for larger model
+  - target:
+      kind: Deployment
+      name: qwen-model
+    path: patch-deployment.yaml

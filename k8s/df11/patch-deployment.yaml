@@ -1,0 +1,30 @@
+# Strategic merge patch for Deployment: configure for DF11 model
+# Adds MODEL_PATH env var and increases memory for the larger model (~42GB vs ~17GB)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen-model
+  namespace: qwen
+spec:
+  template:
+    spec:
+      containers:
+        - name: model
+          env:
+            - name: HOME
+              value: /tmp
+            - name: HF_HOME
+              value: /models
+            - name: TRANSFORMERS_CACHE
+              value: /models
+            - name: MODEL_PATH
+              value: /models/Qwen-Image-Edit-2511-DF11
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "2000m"
+              memory: "64Gi"
+            requests:
+              cpu: "600m"
+              memory: "48Gi"
+              nvidia.com/gpu: "1"

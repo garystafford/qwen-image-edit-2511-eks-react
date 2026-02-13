@@ -1,0 +1,53 @@
+# JSON patch for DaemonSet: update init container script for DF11 model
+# Changes MODEL_DIR and S3_PREFIX to point to the DF11 flat pipeline layout
+# Also fixes nodeSelector to target the qwen-labeled GPU node
+- op: replace
+  path: /spec/template/spec/nodeSelector
+  value:
+    nvidia.com/gpu.present: "true"
+    workload: "qwen"
+- op: replace
+  path: /spec/template/spec/initContainers/0/args
+  value:
+    - |
+      set -e
+
+      MODEL_DIR="/host-models/Qwen-Image-Edit-2511-DF11"
+      MARKER_FILE="/host-models/.model-ready"
+      # S3_BUCKET comes from environment variable
+      S3_PREFIX="Qwen-Image-Edit-2511-DF11"
+
+      echo "=== Qwen Model Cache DaemonSet (DF11) ==="
+      echo "Node: $(hostname)"
+      echo "Model directory: ${MODEL_DIR}"
+
+      # Check if model already exists on this node
+      if [ -f "${MARKER_FILE}" ]; then
+        echo "✓ Model already cached on this node"
+        exit 0
+      fi
+
+      echo "Model not found, downloading from S3..."
+      echo "S3 location: s3://${S3_BUCKET}/${S3_PREFIX}/"
+
+      # Create directory
+      mkdir -p "${MODEL_DIR}"
+
+      # Download from S3 to node-local storage
+      echo "Starting download..."
+      time aws s3 sync \
+        "s3://${S3_BUCKET}/${S3_PREFIX}/" \
+        "${MODEL_DIR}/" \
+        --region ${AWS_REGION} \
+        --no-progress
+
+      # Set permissions for appuser (UID 1000)
+      echo "Setting permissions for appuser..."
+      chown -R 1000:1000 /host-models
+      chmod -R 755 /host-models
+
+      # Create marker file
+      echo "$(date)" > "${MARKER_FILE}"
+
+      echo "✓ Model cached successfully to node-local EBS"
+      echo "✓ Future pods on this node will use cached model"
