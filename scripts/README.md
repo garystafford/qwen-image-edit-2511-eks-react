@@ -7,6 +7,11 @@ All shell scripts source `common.sh`, which reads `.env` from the project root. 
 ```bash
 cp .env.example .env    # Fill in your AWS values
 chmod +x scripts/*.sh   # Ensure scripts are executable
+
+# Python virtual environment (for upload scripts)
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-scripts.txt
 ```
 
 ## Setup (One-Time)
