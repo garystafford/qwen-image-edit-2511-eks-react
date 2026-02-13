@@ -48,25 +48,42 @@ def validate_env():
         sys.exit(1)
 
 
+def is_model_cached(local_cache_dir, model_id):
+    """Check if a model is already downloaded in the cache."""
+    import glob
+
+    model_cache_name = model_id.replace("/", "--")
+    model_cache_dir = os.path.join(local_cache_dir, "hub", f"models--{model_cache_name}")
+    if not os.path.isdir(model_cache_dir):
+        return False
+    has_safetensors = glob.glob(
+        os.path.join(model_cache_dir, "**", "*.safetensors"), recursive=True
+    )
+    return bool(has_safetensors)
+
+
 def download_model(model_id, local_cache_dir):
     """Download model from HuggingFace to local cache."""
     from huggingface_hub import snapshot_download
+
+    # Find the model directory in cache
+    model_cache_name = model_id.replace("/", "--")
+    cache_dir = os.path.join(local_cache_dir, "hub")
+    model_cache_dir = os.path.join(cache_dir, f"models--{model_cache_name}")
+
+    if is_model_cached(local_cache_dir, model_id):
+        print(f"  Already cached: {model_cache_dir} (skipping download)")
+        return model_cache_dir
 
     print(f"Downloading {model_id} from HuggingFace...")
 
     # Use cache_dir to get proper HuggingFace cache structure
     # This creates: cache_dir/models--{org}--{model}/snapshots/{hash}/
-    cache_dir = os.path.join(local_cache_dir, "hub")
-
     snapshot_download(
         repo_id=model_id,
         cache_dir=cache_dir,
         local_dir_use_symlinks=False,  # Copy files instead of symlinks for S3
     )
-
-    # Find the model directory in cache
-    model_cache_name = model_id.replace("/", "--")
-    model_cache_dir = os.path.join(cache_dir, f"models--{model_cache_name}")
 
     print(f"Model downloaded to cache: {model_cache_dir}")
     return model_cache_dir
@@ -127,13 +144,17 @@ def main():
     print(f"Cache Dir: {args.cache_dir}")
     print()
 
-    # Check for HuggingFace token if needed
+    # Check for HuggingFace token
     hf_token = os.environ.get("HF_TOKEN")
     if hf_token:
         from huggingface_hub import login
 
         login(token=hf_token)
         print("✓ Logged into HuggingFace")
+    else:
+        print("Warning: HF_TOKEN not set. Downloads will be unauthenticated (slower).")
+        print("  Set HF_TOKEN in .env or export HF_TOKEN=hf_... for faster downloads.")
+        print()
 
     # Download model
     local_dir = download_model(args.model_id, args.cache_dir)

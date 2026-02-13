@@ -59,9 +59,23 @@ def validate_env():
         sys.exit(1)
 
 
+def is_model_cached(local_dir):
+    """Check if a model directory already has downloaded files."""
+    if not os.path.isdir(local_dir):
+        return False
+    # Check for safetensors or model_index.json as evidence of a completed download
+    has_safetensors = glob.glob(os.path.join(local_dir, "**", "*.safetensors"), recursive=True)
+    has_index = os.path.exists(os.path.join(local_dir, "model_index.json"))
+    return bool(has_safetensors) or has_index
+
+
 def download_model(model_id, local_dir):
     """Download model from HuggingFace to a local directory."""
     from huggingface_hub import snapshot_download
+
+    if is_model_cached(local_dir):
+        print(f"  Already cached: {local_dir} (skipping download)")
+        return local_dir
 
     print(f"Downloading {model_id} from HuggingFace...")
     snapshot_download(
@@ -170,13 +184,17 @@ def main():
     print(f"Cache Dir:   {args.cache_dir}")
     print()
 
-    # Check for HuggingFace token if needed
+    # Check for HuggingFace token
     hf_token = os.environ.get("HF_TOKEN")
     if hf_token:
         from huggingface_hub import login
 
         login(token=hf_token)
         print("✓ Logged into HuggingFace")
+    else:
+        print("Warning: HF_TOKEN not set. Downloads will be unauthenticated (slower).")
+        print("  Set HF_TOKEN in .env or export HF_TOKEN=hf_... for faster downloads.")
+        print()
 
     # Step 1: Download full base pipeline
     print("[1/4] Downloading base model pipeline...")
