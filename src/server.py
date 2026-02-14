@@ -107,6 +107,27 @@ else:
 print("[Server] Model loaded successfully")
 
 
+def _cleanup_gpu():
+    """Synchronize GPU, release cached memory, and run garbage collection."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+    gc.collect()
+
+
+def _log_gpu_memory(label: str):
+    """Log GPU memory usage for diagnostics."""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / (1024**3)
+        reserved = torch.cuda.memory_reserved() / (1024**3)
+        total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        free = total - reserved
+        print(
+            f"[GPU {label}] Allocated: {allocated:.2f} GiB, "
+            f"Reserved: {reserved:.2f} GiB, Free: {free:.2f} GiB"
+        )
+
+
 def run_fastapi():
     """Run FastAPI on port 8000."""
     import asyncio
@@ -241,33 +262,33 @@ def run_fastapi():
         if callback is not None:
             pipe_kwargs["callback_on_step_end"] = callback
 
+        _log_gpu_memory("pre-inference")
         try:
-            result = pipe(**pipe_kwargs).images
-        except TypeError as e:
-            if "callback_on_step_end" in str(e) and callback is not None:
-                # Pipeline doesn't support step callbacks — fall back
-                print("[API] callback_on_step_end not supported, falling back")
-                del pipe_kwargs["callback_on_step_end"]
+            try:
                 result = pipe(**pipe_kwargs).images
-            else:
-                raise
-        except IndexError:
-            # Workaround for off-by-one bug in the scheduler's sigma lookup
-            # that triggers with certain num_inference_steps values.
-            adjusted = num_inference_steps - 1
-            print(
-                f"[API] Scheduler IndexError at steps={num_inference_steps}, "
-                f"retrying with steps={adjusted}"
-            )
-            pipe_kwargs["num_inference_steps"] = adjusted
-            result = pipe(**pipe_kwargs).images
+            except TypeError as e:
+                if "callback_on_step_end" in str(e) and callback is not None:
+                    # Pipeline doesn't support step callbacks — fall back
+                    print("[API] callback_on_step_end not supported, falling back")
+                    del pipe_kwargs["callback_on_step_end"]
+                    result = pipe(**pipe_kwargs).images
+                else:
+                    raise
+            except IndexError:
+                # Workaround for off-by-one bug in the scheduler's sigma lookup
+                # that triggers with certain num_inference_steps values.
+                adjusted = num_inference_steps - 1
+                print(
+                    f"[API] Scheduler IndexError at steps={num_inference_steps}, "
+                    f"retrying with steps={adjusted}"
+                )
+                pipe_kwargs["num_inference_steps"] = adjusted
+                result = pipe(**pipe_kwargs).images
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-        gc.collect()
-
-        return result
+            return result
+        finally:
+            _cleanup_gpu()
+            _log_gpu_memory("post-cleanup")
 
     @app.post("/api/v1/batch/infer", response_model=BatchInferenceResponse)
     async def batch_infer(request: BatchInferenceRequest):
@@ -348,6 +369,8 @@ def run_fastapi():
             import traceback
             print(f"[API] Batch inference error: {e}")
             traceback.print_exc()
+            _cleanup_gpu()
+            _log_gpu_memory("batch-error-cleanup")
             return BatchInferenceResponse(
                 success=False,
                 images=[],
@@ -480,6 +503,8 @@ def run_fastapi():
                 import traceback
                 print(f"[Stream] Error: {e}")
                 traceback.print_exc()
+                _cleanup_gpu()
+                _log_gpu_memory("stream-error-cleanup")
                 yield _sse_event({
                     "type": "error",
                     "error": "Inference failed. Check server logs for details.",

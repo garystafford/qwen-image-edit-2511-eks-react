@@ -40,6 +40,8 @@ spec:
               value: /models
             - name: TRANSFORMERS_CACHE
               value: /models
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True"
           volumeMounts:
             - name: model-cache
               mountPath: /models

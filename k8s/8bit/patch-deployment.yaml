@@ -23,6 +23,8 @@ spec:
               value: /models/qwen-image-edit-2511-full/snapshots/6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9
             - name: LOAD_IN_8BIT
               value: "true"
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True"
           resources:
             limits:
               nvidia.com/gpu: "1"
