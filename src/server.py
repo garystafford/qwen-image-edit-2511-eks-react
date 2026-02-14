@@ -5,7 +5,6 @@ FastAPI model inference server (port 8000).
 Loads model once, serves batch inference and health-check endpoints.
 """
 
-import json
 import os
 
 # --- Model Loading (shared by both servers) ---
@@ -22,82 +21,41 @@ model_path = os.environ.get("MODEL_PATH", "")
 model_cache_dir = os.environ.get("TRANSFORMERS_CACHE", "/models")
 
 
-def _is_df11_model(path):
-    """Check if the transformer directory contains DF11 compressed weights."""
-    config_file = os.path.join(path, "transformer", "config.json")
-    if not os.path.exists(config_file):
-        return False
-    with open(config_file) as f:
-        return "dfloat11_config" in json.load(f)
+load_in_8bit = os.environ.get("LOAD_IN_8BIT", "").lower() == "true"
 
 
-def _load_df11_pipeline(path):
-    """Load a pipeline with DF11-compressed transformer weights.
+def _load_8bit_pipeline(path):
+    """Load a pipeline with 8-bit quantized transformer via bitsandbytes.
 
-    Follows the official approach from the HuggingFace model card:
-    1. Create transformer, load DF11 weights (device="cpu")
-    2. Build pipeline with the DF11-hooked transformer
-    3. enable_model_cpu_offload() handles all device management
+    Loads the transformer from the full base model with int8 quantization,
+    then builds the pipeline with the remaining components in bf16.
+    Uses enable_model_cpu_offload() for device management.
 
-    enable_model_cpu_offload() moves each component to GPU only when its
-    forward() is called, then offloads it back. Peak VRAM: ~30 GB.
-    Expected inference time: ~100s (A100 benchmark from model card).
+    Expected VRAM: ~25 GB (8-bit transformer + bf16 text encoder + VAE).
     """
-    from dfloat11 import DFloat11Model
-    from diffusers.models import QwenImageTransformer2DModel
+    from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
+    from diffusers.models import AutoModel
 
-    transformer_path = os.path.join(path, "transformer")
-
-    # 1. Create transformer on meta device (zero memory), then materialize on CPU in bf16.
-    #    The RoPE embedding classes (QwenEmbedRope, QwenEmbedLayer3DRope) store pos_freqs
-    #    and neg_freqs as plain attributes (not register_buffer, because complex numbers
-    #    lose their imaginary part). to_empty() won't materialize these, so we recompute
-    #    them after materialization.
-    print("[Server] Creating transformer from config (meta device)...")
-    config = QwenImageTransformer2DModel.load_config(transformer_path)
-    with torch.device("meta"):
-        transformer = QwenImageTransformer2DModel.from_config(config)
-    transformer = transformer.to_empty(device="cpu").to(dtype)
-
-    # Recompute RoPE positional frequency tensors that were lost on meta device
-    recomputed = 0
-    for name, module in transformer.named_modules():
-        if hasattr(module, "pos_freqs") and module.pos_freqs.device == torch.device("meta"):
-            pos_index = torch.arange(4096)
-            neg_index = torch.arange(4096).flip(0) * -1 - 1
-            module.pos_freqs = torch.cat(
-                [module.rope_params(pos_index, dim, module.theta) for dim in module.axes_dim],
-                dim=1,
-            )
-            module.neg_freqs = torch.cat(
-                [module.rope_params(neg_index, dim, module.theta) for dim in module.axes_dim],
-                dim=1,
-            )
-            recomputed += 1
-    print(f"[Server] Recomputed RoPE buffers for {recomputed} modules")
-    transformer.eval()
-
-    # 2. Load DF11 compressed weights with device="cpu" (official approach).
-    #    This registers CuPy decode hooks and loads biases/norms from safetensors.
-    #    enable_model_cpu_offload() will move to GPU when forward() is called.
-    print("[Server] Loading DF11 compressed weights (device=cpu)...")
-    DFloat11Model.from_pretrained(
-        transformer_path,
-        bfloat16_model=transformer,
-        device="cpu",
+    print("[Server] Loading transformer with 8-bit quantization...")
+    quantization_config = DiffusersBnBConfig(
+        load_in_8bit=True,
+        llm_int8_threshold=6.0,
+    )
+    transformer = AutoModel.from_pretrained(
+        path,
+        subfolder="transformer",
+        quantization_config=quantization_config,
+        torch_dtype=dtype,
     )
 
-    # 3. Load the rest of the pipeline (text encoder, VAE, scheduler)
-    print("[Server] Loading pipeline components...")
+    print("[Server] Loading pipeline components (bf16)...")
     pipeline = QwenImageEditPlusPipeline.from_pretrained(
         path,
         transformer=transformer,
         torch_dtype=dtype,
     )
 
-    # 4. Let accelerate manage all device placement (official approach).
-    #    Each component moves to GPU for its forward pass, then back to CPU.
-    print("[Server] Enabling model CPU offload (accelerate-managed)...")
+    print("[Server] Enabling model CPU offload...")
     pipeline.enable_model_cpu_offload()
 
     if torch.cuda.is_available():
@@ -107,10 +65,19 @@ def _load_df11_pipeline(path):
     return pipeline
 
 
-if model_path and os.path.isdir(model_path) and _is_df11_model(model_path):
-    # DF11 compressed model (e.g., Qwen-Image-Edit-2511-DF11)
-    print(f"[Server] Loading DF11 model from: {model_path}")
-    pipe = _load_df11_pipeline(model_path)
+if model_path and os.path.isdir(model_path) and load_in_8bit:
+    # 8-bit quantized model via bitsandbytes
+    print(f"[Server] Loading 8-bit model from: {model_path}")
+    import sys
+    try:
+        pipe = _load_8bit_pipeline(model_path)
+    except Exception as e:
+        import traceback
+        print(f"[Server] 8-bit loading failed: {e}", flush=True)
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.exit(1)
 elif model_path and os.path.isdir(model_path):
     # Direct path to a standard model directory
     print(f"[Server] Loading model from MODEL_PATH: {model_path}")

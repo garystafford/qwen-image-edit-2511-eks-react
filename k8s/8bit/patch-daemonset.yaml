@@ -1,6 +1,6 @@
-# JSON patch for DaemonSet: update init container script for DF11 model
-# Changes MODEL_DIR and S3_PREFIX to point to the DF11 flat pipeline layout
-# Also fixes nodeSelector to target the qwen-labeled GPU node
+# JSON patch for DaemonSet: cache full base model for 8-bit quantization
+# Downloads from S3 in HF cache format (blobs/refs/snapshots)
+# Uses variant-specific marker file to avoid conflicts with other model variants
 - op: replace
   path: /spec/template/spec/nodeSelector
   value:
@@ -12,12 +12,12 @@
     - |
       set -e
 
-      MODEL_DIR="/host-models/Qwen-Image-Edit-2511-DF11"
-      MARKER_FILE="/host-models/.model-ready"
+      MODEL_DIR="/host-models/qwen-image-edit-2511-full"
+      MARKER_FILE="/host-models/.model-ready-8bit"
       # S3_BUCKET comes from environment variable
-      S3_PREFIX="Qwen-Image-Edit-2511-DF11"
+      S3_PREFIX="qwen-image-edit-2511-full"
 
-      echo "=== Qwen Model Cache DaemonSet (DF11) ==="
+      echo "=== Qwen Model Cache DaemonSet (8-bit) ==="
       echo "Node: $(hostname)"
       echo "Model directory: ${MODEL_DIR}"
 
@@ -29,6 +29,7 @@
 
       echo "Model not found, downloading from S3..."
       echo "S3 location: s3://${S3_BUCKET}/${S3_PREFIX}/"
+      echo "Note: Full base model is ~103 GB, download may take several minutes"
 
       # Create directory
       mkdir -p "${MODEL_DIR}"

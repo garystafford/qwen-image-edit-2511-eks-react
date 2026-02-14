@@ -1,5 +1,7 @@
-# Strategic merge patch for Deployment: configure for DF11 model
-# Adds MODEL_PATH env var and increases memory for the larger model (~42GB vs ~17GB)
+# Strategic merge patch for Deployment: 8-bit quantized model
+# - Sets MODEL_PATH to full base model snapshot directory
+# - Enables LOAD_IN_8BIT for bitsandbytes int8 quantization
+# - Increases memory for larger base model (~103 GB on disk, ~25 GB VRAM)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,13 +20,15 @@ spec:
             - name: TRANSFORMERS_CACHE
               value: /models
             - name: MODEL_PATH
-              value: /models/Qwen-Image-Edit-2511-DF11
+              value: /models/qwen-image-edit-2511-full/snapshots/6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9
+            - name: LOAD_IN_8BIT
+              value: "true"
           resources:
             limits:
               nvidia.com/gpu: "1"
               cpu: "2000m"
-              memory: "64Gi"
+              memory: "48Gi"
             requests:
               cpu: "600m"
-              memory: "48Gi"
+              memory: "32Gi"
               nvidia.com/gpu: "1"

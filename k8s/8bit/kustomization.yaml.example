@@ -1,0 +1,37 @@
+# Kustomize overlay for 8-bit quantized model
+# Uses bitsandbytes int8 quantization on the full base model
+#
+# Setup:
+#   1. Copy this file: cp kustomization.yaml.example kustomization.yaml
+#   2. Update the image name to match MODEL_IMAGE in k8s/base/config.yaml
+#      (replace YOUR-ACCOUNT-ID and YOUR-REGION with your values)
+#   3. Update the newTag to your 8-bit image version
+#
+# Usage:
+#   kubectl apply -k k8s/8bit/    # Deploy with 8-bit model
+#   kubectl apply -k k8s/base/    # Revert to 4-bit model
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+# Override model image tag (same codebase, quantization controlled by env var)
+# The image name must match the MODEL_IMAGE base (without tag) from k8s/base/config.yaml
+images:
+  - name: YOUR-ACCOUNT-ID.dkr.ecr.YOUR-REGION.amazonaws.com/qwen-model
+    newTag: 1.7.1-8bit
+
+patches:
+  # Patch DaemonSet: cache full base model from S3 (instead of 4-bit)
+  - target:
+      kind: DaemonSet
+      name: qwen-model-cache
+    path: patch-daemonset.yaml
+
+  # Patch Deployment: set MODEL_PATH to full model, enable 8-bit quantization
+  - target:
+      kind: Deployment
+      name: qwen-model
+    path: patch-deployment.yaml
