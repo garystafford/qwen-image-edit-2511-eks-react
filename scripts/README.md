@@ -23,7 +23,8 @@ pip install -r requirements-scripts.txt
 | `setup-eks-prerequisites.sh` | Setup IAM roles (IRSA), EFS, S3 access |
 | `install-alb-controller.sh` | Install AWS ALB ingress controller on EKS |
 | `setup-cloudfront-auth.sh` | Setup CloudFront + WAF + Cognito authentication |
-| `upload-weights-to-s3.py` | Download model from HuggingFace and upload to S3 |
+| `upload-weights-to-s3.py` | Download 4-bit model from HuggingFace and upload to S3 |
+| `upload-weights-to-s3-full.py` | Download full base model from HuggingFace and upload to S3 (for 8-bit) |
 
 ### CloudFront Authentication
 

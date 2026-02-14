@@ -20,7 +20,7 @@ graph TD
 
     Model -- "Loads from /mnt/qwen-models" --> DS["DaemonSet · Model Cache<br/>Downloads model from S3<br/>to node-local EBS on first boot"]
 
-    DS --> S3[("S3 Bucket<br/>17GB model<br/>4-bit quantized")]
+    DS --> S3[("S3 Bucket<br/>Model Weights<br/>4-bit (17GB) or full (103GB)")]
 ```
 
 ### Two-Container Design
@@ -146,7 +146,7 @@ sequenceDiagram
     K8s->>DS: Schedule on GPU node
     DS->>EBS: Check .model-ready marker
     alt Model not cached
-        DS->>S3: aws s3 sync (17GB)
+        DS->>S3: aws s3 sync model weights
         S3-->>EBS: Download model weights
         DS->>EBS: Set permissions (UID 1000)
         DS->>EBS: Write .model-ready marker
@@ -155,7 +155,7 @@ sequenceDiagram
     end
     K8s->>Pod: Schedule model deployment
     Pod->>EBS: Load model from /models
-    Pod->>GPU: Transfer to VRAM (~18GB)
+    Pod->>GPU: Transfer to VRAM
     Pod->>Pod: Start FastAPI server
     Pod-->>K8s: Health check passes<br/>GET /api/v1/health
     Note over K8s,GPU: Ready for inference<br/>~120s initialDelaySeconds
@@ -219,7 +219,17 @@ cp k8s/base/config.yaml.example k8s/base/config.yaml
 ### 4. Deploy
 
 ```bash
+# Deploy with 4-bit quantized model (default)
 ./scripts/deploy.sh
+
+# Or deploy with 8-bit bitsandbytes quantization (higher quality, more VRAM)
+# First, configure the 8-bit overlay:
+cp k8s/8bit/kustomization.yaml.example k8s/8bit/kustomization.yaml
+# Edit kustomization.yaml — set image name to match your MODEL_IMAGE in k8s/base/config.yaml
+kubectl apply -k k8s/8bit/
+
+# Revert to 4-bit at any time:
+kubectl apply -k k8s/base/
 ```
 
 ### 5. Setup CloudFront Authentication (Optional)
@@ -387,7 +397,7 @@ kill %1
 │   └── server.py                 # FastAPI model service (port 8000)
 ├── frontend/                     # React UI (TypeScript, Vite, Tailwind CSS)
 ├── k8s/
-│   ├── base/
+│   ├── base/                     # Default 4-bit quantized deployment
 │   │   ├── config.yaml.example   # Kustomize config template
 │   │   ├── kustomization.yaml    # Replacement rules
 │   │   ├── namespace.yaml        # qwen namespace
@@ -400,6 +410,10 @@ kill %1
 │   │   ├── pdb-ui.yaml           # PodDisruptionBudget for UI
 │   │   ├── networkpolicy.yaml    # Default-deny ingress + allow rules
 │   │   └── daemonset-model-cache.yaml  # S3 model download per node
+│   ├── 8bit/                     # 8-bit bitsandbytes overlay
+│   │   ├── kustomization.yaml.example  # Overlay config template
+│   │   ├── patch-daemonset.yaml  # Download full model from S3
+│   │   └── patch-deployment.yaml # Set MODEL_PATH + LOAD_IN_8BIT
 │   └── alb-controller/
 │       └── iam-policy.json       # ALB controller IAM permissions
 ├── scripts/
@@ -414,28 +428,46 @@ kill %1
 │   ├── setup-cloudfront-auth.sh  # CloudFront + WAF + Cognito setup
 │   ├── verify-prerequisites.sh   # Check tools and access
 │   ├── check-gpu-availability.sh # GPU instance capacity check
-│   ├── run-tests.sh             # End-to-end deployment tests
+│   ├── run-tests.sh              # End-to-end deployment tests
+│   ├── upload-weights-to-s3.py   # Upload 4-bit model to S3
+│   ├── upload-weights-to-s3-full.py # Upload full base model to S3 (for 8-bit)
 │   └── batch_process_fastapi.py  # Batch test against API
 └── samples_images/               # 18 test images + prompts
 ```
 
 ## Performance
 
+### 4-bit (NF4 quantized — default)
+
 | Metric               | Value                  |
 | -------------------- | ---------------------- |
-| Model Size           | 17GB (4-bit quantized) |
+| Model Size on Disk   | 17GB                   |
 | First Node Boot      | 4-5 min (S3 download)  |
 | Pod Startup (cached) | 10-15 sec              |
-| GPU Memory Usage     | ~18GB / 48GB (L40S)    |
+| GPU Memory Usage     | ~18GB / 46GB (L40S)    |
 | Inference Speed      | ~3 sec per step        |
 | RAM Required         | 24GB                   |
 | Storage per Node     | 20GB (model cache)     |
+
+### 8-bit (bitsandbytes int8 — optional overlay)
+
+| Metric               | Value                  |
+| -------------------- | ---------------------- |
+| Model Size on Disk   | 103GB (full base model)|
+| First Node Boot      | ~30 min (S3 download)  |
+| Pod Startup (cached) | 60-90 sec              |
+| GPU Memory Usage     | ~24GB / 46GB (L40S)    |
+| Inference Speed      | ~10 sec per step       |
+| RAM Required         | 32GB                   |
+| Storage per Node     | 110GB (model cache)    |
+
+The 8-bit variant quantizes the transformer at load time using bitsandbytes, retaining more weight precision than 4-bit NF4. Deploy with `kubectl apply -k k8s/8bit/` and revert with `kubectl apply -k k8s/base/`.
 
 ## AWS Requirements
 
 - **EKS Cluster**: v1.28+
 - **Node Group**: `g6e.2xlarge` (NVIDIA L40S, 46GB VRAM), 300GB EBS
-- **S3 Bucket**: 17GB for model weights
+- **S3 Bucket**: 17GB for 4-bit model weights (or 103GB for full base model used by 8-bit)
 - **ECR**: Two repositories (~7GB total)
 - **IAM Role**: S3 read access via IRSA
 - **ACM Certificate**: For HTTPS (must be in us-east-1 for CloudFront)
@@ -532,8 +564,8 @@ immediately, avoiding this limit. If you see 504s during inference:
 
 ## Resources
 
-- [Qwen-Image-Edit-2511-4bit][qwen-4bit] (HuggingFace)
-- [Qwen-Image-Edit-2511][qwen-orig] (Original model)
+- [Qwen-Image-Edit-2511-4bit][qwen-4bit] (HuggingFace — 4-bit NF4 quantized)
+- [Qwen-Image-Edit-2511][qwen-orig] (HuggingFace — full base model, used by 8-bit)
 - [Amazon EKS User Guide][eks-docs]
 
 [qwen-4bit]: https://huggingface.co/ovedrive/Qwen-Image-Edit-2511-4bit
