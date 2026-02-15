@@ -6,8 +6,6 @@ Loads model once, serves batch inference and health-check endpoints.
 """
 
 import os
-
-# --- Model Loading (shared by both servers) ---
 import gc
 import numpy as np
 import torch
@@ -19,20 +17,11 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model_path = os.environ.get("MODEL_PATH", "")
 model_cache_dir = os.environ.get("TRANSFORMERS_CACHE", "/models")
-
-
 load_in_8bit = os.environ.get("LOAD_IN_8BIT", "").lower() == "true"
 
 
 def _load_8bit_pipeline(path):
-    """Load a pipeline with 8-bit quantized transformer via bitsandbytes.
-
-    Loads the transformer from the full base model with int8 quantization,
-    then builds the pipeline with the remaining components in bf16.
-    Uses enable_model_cpu_offload() for device management.
-
-    Expected VRAM: ~25 GB (8-bit transformer + bf16 text encoder + VAE).
-    """
+    """Load a pipeline with 8-bit quantized transformer via bitsandbytes."""
     from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
     from diffusers.models import AutoModel
 
@@ -66,7 +55,6 @@ def _load_8bit_pipeline(path):
 
 
 if model_path and os.path.isdir(model_path) and load_in_8bit:
-    # 8-bit quantized model via bitsandbytes
     print(f"[Server] Loading 8-bit model from: {model_path}")
     import sys
     try:
@@ -79,13 +67,11 @@ if model_path and os.path.isdir(model_path) and load_in_8bit:
         sys.stderr.flush()
         sys.exit(1)
 elif model_path and os.path.isdir(model_path):
-    # Direct path to a standard model directory
     print(f"[Server] Loading model from MODEL_PATH: {model_path}")
     pipe = QwenImageEditPlusPipeline.from_pretrained(
         model_path, torch_dtype=dtype
     ).to(device)
 else:
-    # Fall back to 4-bit HF cache layout
     model_cache_path = os.path.join(
         model_cache_dir, "models--ovedrive--Qwen-Image-Edit-2511-4bit"
     )
@@ -108,7 +94,6 @@ print("[Server] Model loaded successfully")
 
 
 def _cleanup_gpu():
-    """Synchronize GPU, release cached memory, and run garbage collection."""
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
@@ -116,7 +101,6 @@ def _cleanup_gpu():
 
 
 def _log_gpu_memory(label: str):
-    """Log GPU memory usage for diagnostics."""
     if torch.cuda.is_available():
         allocated = torch.cuda.memory_allocated() / (1024**3)
         reserved = torch.cuda.memory_reserved() / (1024**3)
@@ -129,7 +113,6 @@ def _log_gpu_memory(label: str):
 
 
 def run_fastapi():
-    """Run FastAPI on port 8000."""
     import asyncio
     import base64
     import io
@@ -162,7 +145,11 @@ def run_fastapi():
         index: int
 
     class BatchInferenceRequest(BaseModel):
+        # images[0] = source (already padded to 1024x1024)
         images: List[ImageInput]
+        # optional mask: white=editable, black=protected
+        mask_image: Optional[ImageInput] = None
+
         prompt: str
         negative_prompt: str = DEFAULT_NEGATIVE_PROMPT
         seed: int = Field(default=42, ge=0, le=MAX_SEED)
@@ -207,12 +194,10 @@ def run_fastapi():
 
     @app.get("/")
     async def root():
-        """Root endpoint."""
         return {"status": "ok", "service": "qwen-model-api"}
 
     @app.get("/healthz")
     async def healthz():
-        """Lightweight health check for ALB target group."""
         return {"status": "ok"}
 
     @app.get("/api/v1/health", response_model=HealthResponse)
@@ -234,22 +219,55 @@ def run_fastapi():
             gpu_memory_total_gb=round(gpu_mem_total, 2) if gpu_mem_total else None,
         )
 
-    def _run_inference(
-        pil_images: list,
-        prompt: str,
-        height: int,
-        width: int,
-        negative_prompt: str,
-        num_inference_steps: int,
-        generator: torch.Generator,
-        guidance_scale: float,
-        num_images_per_prompt: int,
+    def _apply_mask_blend(src_image, generated_images, mask_image):
+        """
+        Blend generated images with original using mask (post-processing).
+
+        mask_image: white (255) = editable (use generated),
+                    black (0)   = protected (keep original).
+        All blending is done in src_image resolution.
+        """
+        if mask_image is None:
+            return generated_images
+
+        src = src_image.convert("RGB")
+        src_w, src_h = src.size
+
+        mask = mask_image.convert("L").resize((src_w, src_h), Image.NEAREST)
+        mask_arr = np.array(mask, dtype=np.float32) / 255.0
+        mask_arr = mask_arr[..., None]  # (H, W, 1)
+
+        src_arr = np.array(src, dtype=np.float32)
+
+        blended = []
+        for gen_img in generated_images:
+            gen = gen_img.convert("RGB").resize((src_w, src_h), Image.BILINEAR)
+            gen_arr = np.array(gen, dtype=np.float32)
+            out_arr = src_arr * (1.0 - mask_arr) + gen_arr * mask_arr
+            out_arr = np.clip(out_arr, 0, 255).astype(np.uint8)
+            blended.append(Image.fromarray(out_arr, mode="RGB"))
+        return blended
+
+    def _run_inference_with_mask_and_refs(
+        src_image,
+        mask_image,
+        style_refs,
+        prompt,
+        height,
+        width,
+        negative_prompt,
+        num_inference_steps,
+        generator,
+        guidance_scale,
+        num_images_per_prompt,
         callback=None,
-    ) -> list:
-        """Run the diffusion pipeline (blocking). Called via asyncio.to_thread()
-        so the event loop stays free for health checks during inference."""
+    ):
+        # Pass all images (source + style refs) as a list, matching the
+        # original behavior where the pipeline receives the full image set.
+        image_input = [src_image] + style_refs if style_refs else src_image
+
         pipe_kwargs = {
-            "image": pil_images,
+            "image": image_input,
             "prompt": prompt,
             "height": height,
             "width": width,
@@ -259,6 +277,7 @@ def run_fastapi():
             "true_cfg_scale": guidance_scale,
             "num_images_per_prompt": num_images_per_prompt,
         }
+
         if callback is not None:
             pipe_kwargs["callback_on_step_end"] = callback
 
@@ -268,15 +287,12 @@ def run_fastapi():
                 result = pipe(**pipe_kwargs).images
             except TypeError as e:
                 if "callback_on_step_end" in str(e) and callback is not None:
-                    # Pipeline doesn't support step callbacks — fall back
                     print("[API] callback_on_step_end not supported, falling back")
                     del pipe_kwargs["callback_on_step_end"]
                     result = pipe(**pipe_kwargs).images
                 else:
                     raise
             except IndexError:
-                # Workaround for off-by-one bug in the scheduler's sigma lookup
-                # that triggers with certain num_inference_steps values.
                 adjusted = num_inference_steps - 1
                 print(
                     f"[API] Scheduler IndexError at steps={num_inference_steps}, "
@@ -284,6 +300,10 @@ def run_fastapi():
                 )
                 pipe_kwargs["num_inference_steps"] = adjusted
                 result = pipe(**pipe_kwargs).images
+
+            if mask_image is not None:
+                print(f"[API] Applying mask blend to {len(result)} output images")
+                result = _apply_mask_blend(src_image, result, mask_image)
 
             return result
         finally:
@@ -299,12 +319,22 @@ def run_fastapi():
         output_images = []
 
         try:
-            # Decode all input images first
+            if not request.images:
+                raise HTTPException(status_code=400, detail="At least one image is required")
+
             pil_images = []
             for idx, img_input in enumerate(request.images):
                 pil_image = decode_base64_image(img_input.data)
                 pil_images.append(pil_image)
                 print(f"[API] Loaded image {idx + 1}/{len(request.images)}")
+
+            src_image = pil_images[0]
+            style_refs = pil_images[1:]
+
+            mask_pil = None
+            if request.mask_image is not None:
+                mask_pil = decode_base64_image(request.mask_image.data)
+                print("[API] Loaded mask image")
 
             seed = (
                 random.randint(0, MAX_SEED) if request.randomize_seed else request.seed
@@ -315,13 +345,15 @@ def run_fastapi():
                 "style reference mode" if request.style_reference_mode else "batch mode"
             )
             print(
-                f"[API] Processing {len(pil_images)} images ({mode_str}), seed={seed}"
+                f"[API] Processing images (mode={mode_str}), seed={seed}, "
+                f"style_refs={len(style_refs)}, has_mask={mask_pil is not None}"
             )
 
-            # Run pipeline in a thread so health checks remain responsive
             result = await asyncio.to_thread(
-                _run_inference,
-                pil_images,
+                _run_inference_with_mask_and_refs,
+                src_image,
+                mask_pil,
+                style_refs,
                 request.prompt,
                 request.height,
                 request.width,
@@ -335,7 +367,6 @@ def run_fastapi():
             print(f"[API] Received {len(result)} output images from pipeline")
 
             if request.style_reference_mode:
-                # Return only the last image (target edit), previous images were style references
                 if result:
                     final_image = result[-1]
                     output_images.append(
@@ -349,7 +380,6 @@ def run_fastapi():
                         f"[API] Style reference mode: Returning final image (last of {len(result)})"
                     )
             else:
-                # Return all edited images (batch mode)
                 for idx, img in enumerate(result):
                     output_images.append(
                         ImageOutput(
@@ -389,7 +419,6 @@ def run_fastapi():
             raise HTTPException(status_code=503, detail="Model not loaded")
 
         async def event_stream():
-            # First byte within milliseconds — resets CloudFront timeout
             yield _sse_event({
                 "type": "started",
                 "total_steps": request.num_inference_steps,
@@ -398,11 +427,21 @@ def run_fastapi():
             start_time = time.time()
 
             try:
-                # Decode input images
+                if not request.images:
+                    raise ValueError("At least one image is required")
+
                 pil_images = []
                 for idx, img_input in enumerate(request.images):
                     pil_images.append(decode_base64_image(img_input.data))
                     print(f"[Stream] Loaded image {idx + 1}/{len(request.images)}")
+
+                src_image = pil_images[0]
+                style_refs = pil_images[1:]
+
+                mask_pil = None
+                if request.mask_image is not None:
+                    mask_pil = decode_base64_image(request.mask_image.data)
+                    print("[Stream] Loaded mask image")
 
                 seed = (
                     random.randint(0, MAX_SEED)
@@ -417,23 +456,23 @@ def run_fastapi():
                     else "batch mode"
                 )
                 print(
-                    f"[Stream] Processing {len(pil_images)} images "
-                    f"({mode_str}), seed={seed}"
+                    f"[Stream] Processing images (mode={mode_str}), seed={seed}, "
+                    f"style_refs={len(style_refs)}, has_mask={mask_pil is not None}"
                 )
 
-                # Thread-safe queue for per-step progress from pipeline callback
                 progress_q: queue.Queue[int] = queue.Queue()
 
                 def step_callback(_pipe, step_index, _timestep, kwargs):
-                    progress_q.put(step_index + 1)  # 1-indexed
+                    progress_q.put(step_index + 1)
                     return kwargs
 
-                # Run inference in thread pool
                 loop = asyncio.get_event_loop()
                 future = loop.run_in_executor(
                     None,
-                    _run_inference,
-                    pil_images,
+                    _run_inference_with_mask_and_refs,
+                    src_image,
+                    mask_pil,
+                    style_refs,
                     request.prompt,
                     request.height,
                     request.width,
@@ -445,7 +484,6 @@ def run_fastapi():
                     step_callback,
                 )
 
-                # Stream progress/heartbeats while inference runs
                 while not future.done():
                     await asyncio.sleep(1)
                     got_progress = False
@@ -468,7 +506,6 @@ def run_fastapi():
                     f"[Stream] Received {len(result)} output images from pipeline"
                 )
 
-                # Encode output images (same logic as batch endpoint)
                 output_images = []
                 if request.style_reference_mode:
                     if result:

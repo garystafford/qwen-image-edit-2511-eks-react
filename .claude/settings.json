@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/garystafford/Documents/projects/qwen-image-edit-2511-eks-react/**)"
+    ]
+  }
+}
