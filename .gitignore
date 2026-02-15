@@ -386,3 +386,4 @@ k8s/base/config.yaml
 k8s/overlays/*/config.yaml
 k8s/8bit/kustomization.yaml
 
+blog/
