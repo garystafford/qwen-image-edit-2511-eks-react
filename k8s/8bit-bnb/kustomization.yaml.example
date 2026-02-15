@@ -8,7 +8,7 @@
 #   3. Update the newTag to your 8-bit image version
 #
 # Usage:
-#   kubectl apply -k k8s/8bit/    # Deploy with 8-bit model
+#   kubectl apply -k k8s/8bit-bnb/    # Deploy with 8-bit model
 #   kubectl apply -k k8s/base/    # Revert to 4-bit model
 
 apiVersion: kustomize.config.k8s.io/v1beta1

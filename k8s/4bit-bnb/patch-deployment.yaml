@@ -1,0 +1,37 @@
+# Strategic merge patch for Deployment: 4-bit bitsandbytes (runtime NF4 quantization)
+# - Sets MODEL_PATH to full base model snapshot directory
+# - Enables LOAD_IN_4BIT for bitsandbytes NF4 quantization at load time
+# - Memory stays at 48Gi: full base model (~103 GB on disk) must be loaded before quantization
+# - Expected VRAM: ~18-20 GB (4-bit transformer + bf16 text encoder + VAE)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen-model
+  namespace: qwen
+spec:
+  template:
+    spec:
+      containers:
+        - name: model
+          env:
+            - name: HOME
+              value: /tmp
+            - name: HF_HOME
+              value: /models
+            - name: TRANSFORMERS_CACHE
+              value: /models
+            - name: MODEL_PATH
+              value: /models/qwen-image-edit-2511-full/snapshots/6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9
+            - name: LOAD_IN_4BIT
+              value: "true"
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              cpu: "2000m"
+              memory: "48Gi"
+            requests:
+              cpu: "600m"
+              memory: "32Gi"
+              nvidia.com/gpu: "1"

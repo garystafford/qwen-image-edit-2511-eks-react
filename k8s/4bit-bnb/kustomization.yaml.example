@@ -1,0 +1,42 @@
+# Kustomize overlay: 4-bit bitsandbytes (runtime quantization)
+# Uses bitsandbytes NF4 quantization on the full base model at load time
+# Source model: Qwen/Qwen-Image-Edit-2511 (~103 GB on disk, ~18-20 GB VRAM)
+#
+# Compare with:
+#   k8s/base/   = 4-bit pre-quantized (ovedrive/Qwen-Image-Edit-2511-4bit, ~17 GB)
+#   k8s/8bit-bnb/   = 8-bit bitsandbytes  (Qwen/Qwen-Image-Edit-2511, ~25 GB VRAM)
+#
+# Setup:
+#   1. Copy this file: cp kustomization.yaml.example kustomization.yaml
+#   2. Update the image name to match MODEL_IMAGE in k8s/base/config.yaml
+#      (replace YOUR-ACCOUNT-ID and YOUR-REGION with your values)
+#   3. Update the newTag to your image version
+#
+# Usage:
+#   kubectl apply -k k8s/4bit-bnb/   # Deploy with 4-bit bitsandbytes
+#   kubectl apply -k k8s/base/       # Revert to pre-quantized 4-bit
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+# Override model image tag (same codebase, quantization controlled by env var)
+# The image name must match the MODEL_IMAGE base (without tag) from k8s/base/config.yaml
+images:
+  - name: YOUR-ACCOUNT-ID.dkr.ecr.YOUR-REGION.amazonaws.com/qwen-model
+    newTag: 1.7.6-4bit-bnb
+
+patches:
+  # Patch DaemonSet: cache full base model from S3 (instead of pre-quantized 4-bit)
+  - target:
+      kind: DaemonSet
+      name: qwen-model-cache
+    path: patch-daemonset.yaml
+
+  # Patch Deployment: set MODEL_PATH to full model, enable 4-bit bitsandbytes
+  - target:
+      kind: Deployment
+      name: qwen-model
+    path: patch-deployment.yaml

@@ -100,15 +100,62 @@ def _load_8bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
     return pipeline
 
 
+def _load_4bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
+    """Load a pipeline with 4-bit NF4 quantized transformer via bitsandbytes.
+
+    Loads the transformer from the full base model with NF4 quantization,
+    then builds the pipeline with the remaining components in bf16.
+    Uses enable_model_cpu_offload() for device management.
+
+    Expected VRAM: ~18-20 GB (4-bit transformer + bf16 text encoder + VAE).
+    """
+    from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
+    from diffusers.models import AutoModel
+
+    logger.info("Loading transformer with 4-bit NF4 quantization...")
+    quantization_config = DiffusersBnBConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    transformer = AutoModel.from_pretrained(
+        path,
+        subfolder="transformer",
+        quantization_config=quantization_config,
+        torch_dtype=dtype,
+    )
+
+    logger.info("Loading pipeline components (bf16)...")
+    pipeline = QwenImageEditPlusPipeline.from_pretrained(
+        path,
+        transformer=transformer,
+        torch_dtype=dtype,
+    )
+
+    logger.info("Enabling model CPU offload...")
+    pipeline.enable_model_cpu_offload()
+
+    if torch.cuda.is_available():
+        vram_gb = torch.cuda.memory_allocated() / GIB
+        logger.info("GPU memory after setup: %.1f GB", vram_gb)
+
+    return pipeline
+
+
 def _load_pipeline() -> QwenImageEditPlusPipeline:
     """Load the diffusion pipeline based on environment configuration."""
     model_path = os.environ.get("MODEL_PATH", "")
     model_cache_dir = os.environ.get("TRANSFORMERS_CACHE", "/models")
     load_in_8bit = os.environ.get("LOAD_IN_8BIT", "").lower() == "true"
+    load_in_4bit = os.environ.get("LOAD_IN_4BIT", "").lower() == "true"
 
     if model_path and os.path.isdir(model_path) and load_in_8bit:
-        logger.info("Loading 8-bit model from: %s", model_path)
+        logger.info("Loading 8-bit bitsandbytes model from: %s", model_path)
         return _load_8bit_pipeline(model_path)
+
+    if model_path and os.path.isdir(model_path) and load_in_4bit:
+        logger.info("Loading 4-bit bitsandbytes model from: %s", model_path)
+        return _load_4bit_pipeline(model_path)
 
     if model_path and os.path.isdir(model_path):
         logger.info("Loading model from MODEL_PATH: %s", model_path)
