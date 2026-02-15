@@ -224,11 +224,16 @@ cp k8s/base/config.yaml.example k8s/base/config.yaml
 
 # Or deploy with 8-bit bitsandbytes quantization (higher quality, more VRAM)
 # First, configure the 8-bit overlay:
-cp k8s/8bit/kustomization.yaml.example k8s/8bit/kustomization.yaml
+cp k8s/8bit-bnb/kustomization.yaml.example k8s/8bit-bnb/kustomization.yaml
 # Edit kustomization.yaml — set image name to match your MODEL_IMAGE in k8s/base/config.yaml
-kubectl apply -k k8s/8bit/
+kubectl apply -k k8s/8bit-bnb/
 
-# Revert to 4-bit at any time:
+# Or deploy with 4-bit bitsandbytes quantization (runtime NF4, full base model)
+cp k8s/4bit-bnb/kustomization.yaml.example k8s/4bit-bnb/kustomization.yaml
+# Edit kustomization.yaml — set image name to match your MODEL_IMAGE in k8s/base/config.yaml
+kubectl apply -k k8s/4bit-bnb/
+
+# Revert to pre-quantized 4-bit at any time:
 kubectl apply -k k8s/base/
 ```
 
@@ -464,13 +469,13 @@ kill %1
 | RAM Required         | 32GB                   |
 | Storage per Node     | 110GB (model cache)    |
 
-The 8-bit variant quantizes the transformer at load time using bitsandbytes, retaining more weight precision than 4-bit NF4. Deploy with `kubectl apply -k k8s/8bit/` and revert with `kubectl apply -k k8s/base/`.
+The 8-bit variant quantizes the transformer at load time using bitsandbytes, retaining more weight precision than 4-bit NF4. Deploy with `kubectl apply -k k8s/8bit-bnb/` and revert with `kubectl apply -k k8s/base/`. A 4-bit bitsandbytes overlay is also available (`kubectl apply -k k8s/4bit-bnb/`) which applies NF4 quantization at runtime on the full base model.
 
 ## AWS Requirements
 
 - **EKS Cluster**: v1.28+
 - **Node Group**: `g6e.2xlarge` (NVIDIA L40S, 46GB VRAM), 300GB EBS
-- **S3 Bucket**: 17GB for 4-bit model weights (or 103GB for full base model used by 8-bit)
+- **S3 Bucket**: 17GB for 4-bit model weights (or 103GB for full base model used by 8-bit/4-bit bitsandbytes)
 - **ECR**: Two repositories (~7GB total)
 - **IAM Role**: S3 read access via IRSA
 - **ACM Certificate**: For HTTPS (must be in us-east-1 for CloudFront)

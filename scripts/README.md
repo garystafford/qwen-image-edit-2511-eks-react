@@ -24,7 +24,7 @@ pip install -r requirements-scripts.txt
 | `install-alb-controller.sh` | Install AWS ALB ingress controller on EKS |
 | `setup-cloudfront-auth.sh` | Setup CloudFront + WAF + Cognito authentication |
 | `upload-weights-to-s3.py` | Download 4-bit model from HuggingFace and upload to S3 |
-| `upload-weights-to-s3-full.py` | Download full base model from HuggingFace and upload to S3 (for 8-bit) |
+| `upload-weights-to-s3-full.py` | Download full base model from HuggingFace and upload to S3 (for 8-bit/4-bit bitsandbytes) |
 
 ### CloudFront Authentication
 
@@ -53,6 +53,21 @@ Requires `.env` variables: `COGNITO_USER_POOL_ID`, `APP_DOMAIN`, `ALB_NAME`.
 | Script | Purpose |
 | ------ | ------- |
 | `deploy.sh` | Apply Kustomize manifests (`kubectl apply -k k8s/base/`) |
+
+To deploy with alternative quantization overlays:
+
+```bash
+# 8-bit bitsandbytes (higher quality, ~25GB VRAM)
+cp k8s/8bit-bnb/kustomization.yaml.example k8s/8bit-bnb/kustomization.yaml
+kubectl apply -k k8s/8bit-bnb/
+
+# 4-bit bitsandbytes (runtime NF4 on full base model, ~18-20GB VRAM)
+cp k8s/4bit-bnb/kustomization.yaml.example k8s/4bit-bnb/kustomization.yaml
+kubectl apply -k k8s/4bit-bnb/
+
+# Revert to pre-quantized 4-bit
+kubectl apply -k k8s/base/
+```
 
 ## Diagnostics
 
