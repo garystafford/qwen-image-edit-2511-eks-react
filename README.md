@@ -315,6 +315,7 @@ curl -X POST http://localhost:8000/api/v1/batch/infer \
   -H "Content-Type: application/json" \
   -d '{
     "images": [{"data": "<base64-encoded-image>"}],
+    "mask_image": {"data": "<base64-mask-optional>"},
     "prompt": "Convert to Studio Ghibli style",
     "seed": 42,
     "guidance_scale": 3.0,
@@ -333,6 +334,8 @@ curl -X POST http://localhost:8000/api/v1/batch/infer \
 | `/api/docs`            | GET    | Swagger UI documentation                       |
 
 The React UI uses the **streaming endpoint** (`/api/v1/stream/infer`) which returns Server-Sent Events (SSE) with real-time progress updates. This avoids CloudFront's 60-second origin read timeout by sending the first byte immediately.
+
+Both inference endpoints accept an optional `mask_image` field for region-based editing. The mask is a base64-encoded image where white pixels (255) mark editable regions and black pixels (0) mark protected regions. When provided, the pipeline output is blended with the original image using the mask as an alpha channel.
 
 ### Batch Processing
 
@@ -394,7 +397,7 @@ kill %1
 ├── requirements-base.txt         # PyTorch, transformers, diffusers
 ├── requirements-app.txt          # FastAPI, Pydantic
 ├── src/
-│   └── server.py                 # FastAPI model service (port 8000)
+│   └── server.py                 # FastAPI inference server (batch, SSE, mask blending)
 ├── frontend/                     # React UI (TypeScript, Vite, Tailwind CSS)
 ├── k8s/
 │   ├── base/                     # Default 4-bit quantized deployment
@@ -490,12 +493,23 @@ Defense-in-depth measures applied across the stack:
 | **Pod security** | Model: `runAsNonRoot`, `runAsUser: 1000`, `allowPrivilegeEscalation: false`; UI: `allowPrivilegeEscalation: false` |
 | **PodDisruptionBudget** | UI `minAvailable: 1` for zero-downtime node drains |
 | **Response headers** | nginx + CloudFront Managed-SecurityHeadersPolicy (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) |
-| **Error sanitization** | API returns generic error messages; details logged server-side only |
+| **Error sanitization** | API returns generic error messages; details logged server-side via structured `logging` module |
 | **IAM** | Scoped S3 policy (`s3:GetObject` + `s3:ListBucket` on model bucket only) via IRSA |
 | **Dependencies** | All Python packages pinned to exact versions in `requirements-base.txt` |
 | **Secrets management** | `config.yaml` and `.env` are `.gitignore`'d; only `*.example` templates are tracked |
 
 ## Troubleshooting
+
+### Log Format
+
+The model server uses Python's `logging` module with structured output:
+
+```text
+2026-02-15 13:34:08 [qwen-server] INFO Starting model load...
+2026-02-15 13:36:59 [qwen-server] WARNING Scheduler IndexError at steps=30, retrying with steps=29
+```
+
+Filter by severity: `kubectl logs -n qwen deployment/qwen-model | grep ERROR`
 
 **DaemonSet init container fails with "AccessDenied"**
 Verify IAM role has S3 read permissions and IRSA is configured.
