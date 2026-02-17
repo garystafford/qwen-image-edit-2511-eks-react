@@ -64,9 +64,10 @@ def _load_8bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
 
     Loads the transformer from the full base model with int8 quantization,
     then builds the pipeline with the remaining components in bf16.
-    Uses enable_model_cpu_offload() for device management.
+    The transformer is placed on GPU by bitsandbytes during quantization;
+    remaining components (VAE, text encoder) are moved to GPU explicitly.
 
-    Expected VRAM: ~25 GB (8-bit transformer + bf16 text encoder + VAE).
+    Expected VRAM: ~35 GB (8-bit transformer + bf16 text encoder + VAE).
     """
     from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
     from diffusers.models import AutoModel
@@ -90,8 +91,14 @@ def _load_8bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
         torch_dtype=dtype,
     )
 
-    logger.info("Enabling model CPU offload...")
-    pipeline.enable_model_cpu_offload()
+    # Move non-quantized components to GPU directly (transformer is already
+    # on GPU via bitsandbytes). This avoids enable_model_cpu_offload() which
+    # shuffles components between CPU/GPU on every forward pass.
+    logger.info("Moving non-quantized components to GPU...")
+    for name, component in pipeline.components.items():
+        if hasattr(component, "to") and component is not transformer:
+            component.to(device)
+            logger.info("  %s -> %s", name, device)
 
     if torch.cuda.is_available():
         vram_gb = torch.cuda.memory_allocated() / GIB
@@ -105,7 +112,8 @@ def _load_4bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
 
     Loads the transformer from the full base model with NF4 quantization,
     then builds the pipeline with the remaining components in bf16.
-    Uses enable_model_cpu_offload() for device management.
+    The transformer is placed on GPU by bitsandbytes during quantization;
+    remaining components (VAE, text encoder) are moved to GPU explicitly.
 
     Expected VRAM: ~18-20 GB (4-bit transformer + bf16 text encoder + VAE).
     """
@@ -117,6 +125,7 @@ def _load_4bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
     )
     transformer = AutoModel.from_pretrained(
         path,
@@ -132,8 +141,13 @@ def _load_4bit_pipeline(path: str) -> QwenImageEditPlusPipeline:
         torch_dtype=dtype,
     )
 
-    logger.info("Enabling model CPU offload...")
-    pipeline.enable_model_cpu_offload()
+    # Move non-quantized components to GPU directly (transformer is already
+    # on GPU via bitsandbytes). Same approach as 8-bit path.
+    logger.info("Moving non-quantized components to GPU...")
+    for name, component in pipeline.components.items():
+        if hasattr(component, "to") and component is not transformer:
+            component.to(device)
+            logger.info("  %s -> %s", name, device)
 
     if torch.cuda.is_available():
         vram_gb = torch.cuda.memory_allocated() / GIB
