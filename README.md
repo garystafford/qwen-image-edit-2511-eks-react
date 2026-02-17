@@ -475,7 +475,7 @@ The 8-bit variant quantizes the transformer at load time using bitsandbytes, ret
 
 - **EKS Cluster**: v1.28+
 - **Node Group**: `g6e.2xlarge` (NVIDIA L40S, 46GB VRAM), 300GB EBS
-- **S3 Bucket**: 17GB for 4-bit model weights (or 103GB for full base model used by 8-bit/4-bit bitsandbytes)
+- **S3 Bucket**: 17GB for 4-bit model weights (or 103GB for full base model used by 8-bit)
 - **ECR**: Two repositories (~7GB total)
 - **IAM Role**: S3 read access via IRSA
 - **ACM Certificate**: For HTTPS (must be in us-east-1 for CloudFront)
