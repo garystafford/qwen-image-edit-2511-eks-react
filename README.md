@@ -418,10 +418,14 @@ kill %1
 │   │   ├── pdb-ui.yaml           # PodDisruptionBudget for UI
 │   │   ├── networkpolicy.yaml    # Default-deny ingress + allow rules
 │   │   └── daemonset-model-cache.yaml  # S3 model download per node
-│   ├── 8bit/                     # 8-bit bitsandbytes overlay
+│   ├── 8bit-bnb/                  # 8-bit bitsandbytes overlay
 │   │   ├── kustomization.yaml.example  # Overlay config template
 │   │   ├── patch-daemonset.yaml  # Download full model from S3
 │   │   └── patch-deployment.yaml # Set MODEL_PATH + LOAD_IN_8BIT
+│   ├── 4bit-bnb/                  # 4-bit bitsandbytes overlay (runtime NF4)
+│   │   ├── kustomization.yaml.example  # Overlay config template
+│   │   ├── patch-daemonset.yaml  # Download full model from S3
+│   │   └── patch-deployment.yaml # Set MODEL_PATH + LOAD_IN_4BIT
 │   └── alb-controller/
 │       └── iam-policy.json       # ALB controller IAM permissions
 ├── scripts/
@@ -438,7 +442,7 @@ kill %1
 │   ├── check-gpu-availability.sh # GPU instance capacity check
 │   ├── run-tests.sh              # End-to-end deployment tests
 │   ├── upload-weights-to-s3.py   # Upload 4-bit model to S3
-│   ├── upload-weights-to-s3-full.py # Upload full base model to S3 (for 8-bit)
+│   ├── upload-weights-to-s3-full.py # Upload full base model to S3 (for 8-bit and 4-bit bitsandbytes)
 │   └── batch_process_fastapi.py  # Batch test against API
 └── samples_images/               # 18 test images + prompts
 ```
@@ -464,12 +468,24 @@ kill %1
 | Model Size on Disk   | 103GB (full base model)|
 | First Node Boot      | ~30 min (S3 download)  |
 | Pod Startup (cached) | 60-90 sec              |
-| GPU Memory Usage     | ~24GB / 46GB (L40S)    |
+| GPU Memory Usage     | ~35GB / 46GB (L40S)    |
 | Inference Speed      | ~10 sec per step       |
 | RAM Required         | 32GB                   |
 | Storage per Node     | 110GB (model cache)    |
 
-The 8-bit variant quantizes the transformer at load time using bitsandbytes, retaining more weight precision than 4-bit NF4. Deploy with `kubectl apply -k k8s/8bit-bnb/` and revert with `kubectl apply -k k8s/base/`. A 4-bit bitsandbytes overlay is also available (`kubectl apply -k k8s/4bit-bnb/`) which applies NF4 quantization at runtime on the full base model.
+### 4-bit bitsandbytes (runtime NF4 — optional overlay)
+
+| Metric               | Value                  |
+| -------------------- | ---------------------- |
+| Model Size on Disk   | 103GB (full base model)|
+| First Node Boot      | ~30 min (S3 download)  |
+| Pod Startup (cached) | 60-90 sec              |
+| GPU Memory Usage     | ~18-20GB / 46GB (L40S) |
+| Inference Speed      | ~3 sec per step        |
+| RAM Required         | 32GB                   |
+| Storage per Node     | 110GB (model cache)    |
+
+Three quantization options are available. The **default** (`k8s/base/`) uses a pre-quantized 4-bit NF4 model (~17 GB, ~18 GB VRAM). The **8-bit bitsandbytes** overlay (`kubectl apply -k k8s/8bit-bnb/`) quantizes the full base model to int8 at load time (~35 GB VRAM, higher weight precision). The **4-bit bitsandbytes** overlay (`kubectl apply -k k8s/4bit-bnb/`) applies NF4 quantization at runtime on the full base model (~18-20 GB VRAM). Both runtime overlays download the full 103 GB base model. Revert to the default with `kubectl apply -k k8s/base/`.
 
 ## AWS Requirements
 
